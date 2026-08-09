@@ -36,17 +36,30 @@ function unit(prefix, rootId){
     root, list: el('list'), go: el('load'), bar: el('bar'), steps: el('steps'),
     phase: el('phase'), report: el('report'), count: el('count'),
 
+    /* What the last run came back with, kept so a suggestion can be taken up
+       without running it again. */
+    got: null, rows: [],
+    clean: () => u.rows.length > 0 && u.rows.every(r => r.status === 'ok'),
+
     reset(){
       if (u.report) u.report.innerHTML = '';
       u.steps.innerHTML = '';
       u.phase.textContent = '';
       u.bar.style.width = '0%';
+      u.got = null;
+      u.rows = [];
     },
+
+    /* The button's wording belongs to the unit, not to the caller of the
+       moment: a run that ends in an error has to put the button back without
+       knowing what it said. */
+    words: {busy: 'Loading…', idle: 'Load'},
 
     /* Disabling a button that currently has focus drops focus to the body and
        loses the reader's place, so the status line — which is where the news
        is about to appear anyway — takes it first. */
-    state(s, {busy = 'Loading…', idle = 'Load'} = {}){
+    state(s, words){
+      Object.assign(u.words, words);
       if (s === 'working' && u.root.contains(document.activeElement))
         u.phase.focus?.({preventScroll: true});
       root.dataset.state = s;
@@ -57,7 +70,7 @@ function unit(prefix, rootId){
          would let a finished fetch write into a pane nobody is looking at. */
       for (const id of ['mode-text', 'mode-cube', 'mode-view', 'mode-diff'])
         $(id).disabled = s === 'working';
-      u.go.textContent = s === 'working' ? busy : idle;
+      u.go.textContent = s === 'working' ? u.words.busy : u.words.idle;
     },
 
     /* Progress and the tick/cross report both land here, whichever phases ran. */
@@ -70,10 +83,11 @@ function unit(prefix, rootId){
       });
     },
 
+    /* Not 'idle' — that hides the progress block the message is sitting in. */
     fail(err){
       console.error(err);
       u.phase.innerHTML = `<span class="bad">${view.esc(err.message)}</span>`;
-      u.state('idle');
+      u.state('done');
     },
   };
   return u;
@@ -292,17 +306,19 @@ export async function init(){
     load.list.value = names.join('\n');
     save(SAVED, load.list.value);
     load.reset();
-    load.state('working');
+    pending = null;
+    load.state('working', {busy: 'Loading…', idle: 'Load'});
 
-    let clean = true, got;
+    let got;
     try {
       const at = load.at([PHASE.find, PHASE.alt]);
       got = await resolveNames(names, {
         at, onReport: rows => {
+          load.rows = rows;
           load.report.innerHTML = view.report(rows);
-          clean = rows.every(r => r.status === 'ok');
         },
       });
+      load.got = got;
     } catch (err) { load.fail(err); return; }
 
     load.state('idle');
@@ -313,9 +329,9 @@ export async function init(){
     }
     /* Anything worth reviewing keeps you here; the gallery is one click away
        and loses nothing by waiting. */
-    if (!clean){
+    if (!load.clean()){
       pending = () => open(got.resolved, got.alts, {missing: got.missing});
-      load.state('done');
+      load.state('review');
       return;
     }
     open(got.resolved, got.alts, {missing: got.missing});
@@ -323,14 +339,53 @@ export async function init(){
 
   /* ---- comparing two cubes ---- */
 
+  /* A side is settled once its list is final — resolved with nothing left to
+     look at, or with what is left explicitly accepted. Comparing half-finished
+     lists would put counts on screen that are about to change. */
+  const settled = {a: false, b: false};
+
   /* Any edit invalidates the comparison, so the chooser withdraws rather than
      letting a stale set of buckets be loaded. */
   const stale = key => {
+    const u = sides[key];
     cube[key] = null;
+    settled[key] = false;
     diff = null;
-    sides[key].root.dataset.state = 'idle';
+    /* The rendered report stays as a record of what the last run said — it is
+       what someone is reading while they fix a name — but the result behind it
+       goes, so nothing can be settled on the strength of it. */
+    u.got = null;
+    u.rows = [];
+    u.root.dataset.state = 'idle';
+    $(key + '-stat').textContent = '';
     $('pick').hidden = true;
     $('pick-load').disabled = true;
+  };
+
+  /* Collapsing a slot that holds the focused element would take that element
+     out of the document, so the summary — which is what is left to read —
+     takes focus first. */
+  function fold(u){
+    if (u.root.contains(document.activeElement))
+      u.root.querySelector('summary').focus({preventScroll: true});
+    u.root.open = false;
+  }
+
+  /* This side is final: fold it away and see whether the other one is too. */
+  function settle(key){
+    settled[key] = true;
+    sides[key].state('done', {idle: 'Resolve again'});
+    fold(sides[key]);
+    offer();
+  }
+
+  const cubeStat = key => {
+    const u = sides[key];
+    $(key + '-stat').textContent = u.got ? view.cubeStat({
+      names: parse(u.list.value).length,
+      missing: u.got.missing.length,
+      alts: u.got.alts.size,
+    }) : '';
   };
 
   async function runSide(key){
@@ -339,37 +394,33 @@ export async function init(){
     if (!names.length){ u.list.focus(); return; }
     u.list.value = names.join('\n');
     u.reset();
+    settled[key] = false;
     u.state('working', {busy: 'Resolving…', idle: 'Resolve'});
 
-    let clean = true;
     try {
       const at = u.at([PHASE.find, PHASE.alt]);
-      cube[key] = await resolveNames(names, {
+      cube[key] = u.got = await resolveNames(names, {
         at, onReport: rows => {
+          u.rows = rows;
           u.report.innerHTML = view.report(rows);
-          clean = rows.every(r => r.status === 'ok');
         },
       });
     } catch (err) { u.fail(err); return; }
 
-    u.state('done', {idle: 'Resolve again'});
-    $(key + '-stat').textContent = view.cubeStat({
-      names: names.length,
-      missing: cube[key].missing.length,
-      alts: cube[key].alts.size,
-    });
-    /* A slot that came back clean folds away to its summary; one with
-       something to look at stays open. Focus moves to the summary first, or
-       collapsing would take the focused element out of the document. */
-    if (clean){
-      u.root.querySelector('summary').focus({preventScroll: true});
-      u.root.open = false;
+    cubeStat(key);
+    /* A slot that came back clean is final and folds away; one with something
+       to look at stays open until it is fixed or accepted. */
+    if (u.clean()) settle(key);
+    else {
+      u.state('review', {idle: 'Resolve again'});
+      offer();
     }
-    offer();
   }
 
   function offer(){
-    if (!cube.a || !cube.b) return;
+    $('pick').hidden = true;
+    $('pick-load').disabled = true;
+    if (!cube.a || !cube.b || !settled.a || !settled.b) return;
     diff = compare(cube.a.resolved, cube.b.resolved);
     const {counts} = diff;
     const names = key => diff[key].map(e => e.name);
@@ -482,9 +533,17 @@ export async function init(){
       });
     });
     $(key + '-load').addEventListener('click', () => runSide(key));
+    $(key + '-on').addEventListener('click', () => settle(key));
     u.list.addEventListener('input', () => { stale(key); counted(u); remember(); });
     $(key + '-src').addEventListener('input', () => { cubeId[key] = null; remember(); link(); });
-    wireRename(u.report, u.list, () => { stale(key); counted(u); });
+    /* Accepting a name leaves this side resolved, so the comparison stands —
+       only the line it is listed under has changed. */
+    wireRename(u, () => {
+      counted(u);
+      remember();
+      cubeStat(key);
+      if (u.clean()) settle(key);
+    });
   }
 
   $('buckets').addEventListener('change', () => {
@@ -496,20 +555,44 @@ export async function init(){
   });
   $('pick-load').addEventListener('click', runPick);
 
-  wireRename(load.report, load.list, () => counted(load));
+  wireRename(load, () => { save(SAVED, load.list.value); counted(load); });
 
-  /* Taking up a suggested name rewrites that line, ready to load again. */
-  function wireRename(reportEl, listEl, after){
-    reportEl.addEventListener('click', e => {
+  /* Taking up a suggested name settles it there and then. The card behind the
+     suggestion is already in hand — the fuzzy lookup that found it is what
+     produced the suggestion — so accepting it moves that card onto the name now
+     on the line and turns the row into a tick. Nothing is looked up again, and
+     there is no reason to run the list a second time. */
+  function accept(u, from, to){
+    const lines = u.list.value.split('\n');
+    const i = lines.findIndex(l => l.trim() === from);
+    if (i >= 0) lines[i] = to;
+    u.list.value = lines.join('\n');
+
+    /* The result behind the report may have been thrown away by an edit since
+       it was drawn. Rewriting the line still stands on its own — it is what
+       the next run will read — so only the settling part is skipped. */
+    const card = u.got?.resolved.get(from);
+    if (!card) return;
+    u.got.resolved.delete(from);
+    u.got.alts.delete(from);
+    u.got.resolved.set(to, card);
+    u.rows = u.rows.map(r => r.input === from ? {input: to, status: 'ok'} : r);
+
+    /* Redrawing the report takes away the button that was just pressed, and
+       with it the focus. The next suggestion is where a keyboard was heading
+       anyway; failing that, the way on. */
+    const refocus = u.report.contains(document.activeElement);
+    u.report.innerHTML = view.report(u.rows);
+    if (refocus)
+      (u.report.querySelector('[data-rename]') || u.root.querySelector('.after button'))
+        ?.focus({preventScroll: true});
+  }
+
+  function wireRename(u, after){
+    u.report.addEventListener('click', e => {
       const btn = e.target.closest('[data-rename]');
       if (!btn) return;
-      const lines = listEl.value.split('\n');
-      const i = lines.findIndex(l => l.trim() === btn.dataset.rename);
-      if (i >= 0) lines[i] = btn.dataset.to;
-      listEl.value = lines.join('\n');
-      if (listEl === load.list) save(SAVED, listEl.value);
-      btn.disabled = true;
-      btn.textContent = 'Updated';
+      accept(u, btn.dataset.rename, btn.dataset.to);
       after();
     });
   }
@@ -552,23 +635,26 @@ export async function init(){
   load.state('idle');
 
   /* A shared link wins over whatever was last open here: someone followed it
-     to see those cubes. The lists are pulled so the comparison is ready to
-     run, but resolving them stays a deliberate click — it is a few hundred
-     card lookups, not something to spend on someone's behalf. */
+     to see those cubes, so it pulls both lists and resolves them without being
+     asked. Each side is still resolved on its own, in turn, so a name that
+     needs attention stops at the cube it belongs to. */
   const q = new URLSearchParams(location.search);
   const shared = {a: q.get('a'), b: q.get('b'), one: q.get('cube')};
   if (shared.a || shared.b){
     mode('diff');
+    const pulled = [];
     for (const key of ['a', 'b']){
       if (!shared[key]) continue;
       $(key + '-src').value = shared[key];
-      await fetchCube(key + '-src', key + '-note', sides[key], got => {
+      const pull = await fetchCube(key + '-src', key + '-note', sides[key], got => {
         $(key + '-name').textContent = got.title;
         cubeId[key] = got.id;
         remember();
         link();
       });
+      if (pull) pulled.push(key);
     }
+    for (const key of pulled) await runSide(key);
   } else if (shared.one){
     mode('cube');
     $('cube').value = shared.one;

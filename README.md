@@ -42,8 +42,13 @@ Names that needed a second look are then listed with a tick or a cross:
 - **✗** nothing matched — check the spelling.
 - **✓ against a different name** the card was found under an alternate name.
   Some printings carry a different name on the physical card, so
-  *Drix Interception* is a printing of *Amazing Acrobatics*. The suggestion
-  comes with a button that rewrites that line in your list.
+  *Drix Interception* is a printing of *Amazing Acrobatics*.
+
+**Taking up a suggestion settles it there and then.** The card behind it is
+already in hand — the fuzzy lookup that found it is what produced the
+suggestion — so accepting rewrites the line, moves that card onto the name now
+on it, and turns the row into a tick. The count above goes up as you go. Nothing
+is looked up again and there is no reason to run the list a second time.
 
 If every name matched exactly the gallery opens straight away; otherwise
 **Continue** carries on with what was found. **Edit list** goes back.
@@ -92,21 +97,34 @@ in the box and offers an **Undo**.
 
 **Diff** takes two cubes. Resolve each one — they get their own progress and
 their own tick/cross report, so a name can be fixed and that cube resolved
-again on its own — and a slot folds away to a one-line summary once it comes
-back clean. Then pick what to look at:
+again on its own.
+
+**A side is finished when its list is final**, and the chooser waits for both
+of them. A slot that comes back clean settles itself and folds away to a
+one-line summary; one with something outstanding stays open, marked, until
+every suggestion has been taken up or **Use these anyway** accepts what is
+left. Comparing half-finished lists would put counts on screen that are about
+to change, so it doesn't.
+
+Once both are settled:
 
 ```
 WHAT DO YOU WANT TO SEE?
 457 shared · 17 only in A · 83 only in B
 
-( ) In both cubes                                        457
-    peach peasant cube ∩ The Peasant Cube 2026
-    ▸ Preview 457 cards
-( ) Only in peach peasant cube                            17
-    missing from The Peasant Cube 2026
-( ) Only in The Peasant Cube 2026                         83
-    missing from peach peasant cube
+( ) ◕◔  In both cubes                                    457
+        peach peasant cube ∩ The Peasant Cube 2026
+        ▸ Preview 457 cards
+( ) ◑◯  Only in peach peasant cube                        17
+        missing from The Peasant Cube 2026
+( ) ◯◐  Only in The Peasant Cube 2026                     83
+        missing from peach peasant cube
 ```
+
+Each option carries a two-circle Venn with the slice it would show filled in —
+A on the left, B on the right, the same way round every time. It says what the
+label says and says it faster, which is also why it is marked decorative and
+never announced.
 
 Each preview opens in place into its own scrolling box, so a 457-card list
 neither moves the page nor runs off the end of it. Choosing a slice and
@@ -127,10 +145,15 @@ The address bar always holds the cubes on screen:
 index.html?a=peach_peasant&b=5d3f7245d1bbf667dd9d4286
 ```
 
-Opening that link goes straight to Diff with both cubes pulled and ready.
-Resolving them stays a deliberate click — it is a thousand card lookups, not
-something to spend on someone else's behalf. **Copy link** puts the URL on the
-clipboard. A single cube shares as `?cube=peach_peasant`.
+Opening that link goes straight to Diff, pulls both cubes and resolves them
+without being asked — someone followed it to see the comparison, so it runs
+itself. Each side is still resolved on its own, in turn, so a name that needs
+attention stops at the cube it belongs to and the chooser waits as usual.
+**Copy link** puts the URL on the clipboard.
+
+A single cube shares as `?cube=peach_peasant`. That one only pulls the list,
+since loading it leaves the setup screen for the gallery entirely — a bigger
+jump to make on someone's behalf than filling in a comparison they can look at.
 
 ## Layout
 

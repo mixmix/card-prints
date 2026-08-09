@@ -81,6 +81,24 @@ export const cubeStat = ({names, missing = 0, alts = 0}) => {
 
    The radio row and the preview are siblings: a control inside a <summary>
    would toggle the disclosure when clicked. */
+
+/* Two overlapping circles with the slice this option would show filled in —
+   A on the left, B on the right, the same way round on every row. It says the
+   same thing as the label beside it and says it faster, which also makes it
+   decorative: nothing here is announced. The clip path and masks are declared
+   once in the document; only which circle gets painted differs. */
+const SLICE = {
+  both:  '<circle class="on" cx="17" cy="14" r="11" clip-path="url(#venn-and)"/>',
+  onlyA: '<circle class="on" cx="17" cy="14" r="11" mask="url(#venn-not-b)"/>',
+  onlyB: '<circle class="on" cx="31" cy="14" r="11" mask="url(#venn-not-a)"/>',
+};
+
+const venn = key => `<svg class="venn" viewBox="0 0 48 28" aria-hidden="true" focusable="false">
+    ${SLICE[key]}
+    <circle class="ring" cx="17" cy="14" r="11"/>
+    <circle class="ring" cx="31" cy="14" r="11"/>
+  </svg>`;
+
 export function buckets(list, a, b){
   const say = {
     both: [`In <b>both</b> cubes`, `${esc(a)} ∩ ${esc(b)}`],
@@ -92,6 +110,7 @@ export function buckets(list, a, b){
     return `<li class="bucket">
       <label class="pick-row">
         <input type="radio" name="bucket" value="${key}"${names.length ? '' : ' disabled'}>
+        ${venn(key)}
         <span class="what">${what}<span class="who">${who}</span></span>
         <span class="n">${names.length}</span>
       </label>

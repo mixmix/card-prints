@@ -22,10 +22,13 @@
 <script type="module" src="js/main.js"></script>
 </head>
 <body data-view="list">
-<!-- referenced by set symbols printed at uncommon; SVG fill takes a paint
-     server like this but not a CSS gradient -->
+<!-- Shared paint and geometry. A clip path and a mask are resolved in the user
+     space of whatever references them, so they can be declared once here and
+     used by every Venn on the page rather than repeated inside each one. -->
 <svg width="0" height="0" aria-hidden="true" focusable="false" style="position:absolute">
   <defs>
+    <!-- referenced by set symbols printed at uncommon; SVG fill takes a paint
+         server like this but not a CSS gradient -->
     <linearGradient id="silver" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0" stop-color="#5f686e"/>
       <stop offset=".22" stop-color="#8e989f"/>
@@ -33,6 +36,15 @@
       <stop offset=".78" stop-color="#8e989f"/>
       <stop offset="1" stop-color="#5f686e"/>
     </linearGradient>
+
+    <!-- the two circles of the bucket Venn: A on the left, B on the right -->
+    <clipPath id="venn-and"><circle cx="31" cy="14" r="11"/></clipPath>
+    <mask id="venn-not-b" maskUnits="userSpaceOnUse" x="0" y="0" width="48" height="28">
+      <rect width="48" height="28" fill="#fff"/><circle cx="31" cy="14" r="11" fill="#000"/>
+    </mask>
+    <mask id="venn-not-a" maskUnits="userSpaceOnUse" x="0" y="0" width="48" height="28">
+      <rect width="48" height="28" fill="#fff"/><circle cx="17" cy="14" r="11" fill="#000"/>
+    </mask>
   </defs>
 </svg>
 
@@ -122,6 +134,10 @@
       <div class="phase" id="a-phase" tabindex="-1" role="status"></div>
     </div>
     <div class="report" id="a-report"></div>
+    <div class="setup-bar after">
+      <button class="go" id="a-on">Use these anyway</button>
+      <span class="count">Take up a suggestion or fix a name, or carry on without the ones that did not match.</span>
+    </div>
   </details>
 
   <details class="cube" id="cube-b" data-state="idle" open>
@@ -148,6 +164,10 @@
       <div class="phase" id="b-phase" tabindex="-1" role="status"></div>
     </div>
     <div class="report" id="b-report"></div>
+    <div class="setup-bar after">
+      <button class="go" id="b-on">Use these anyway</button>
+      <span class="count">Take up a suggestion or fix a name, or carry on without the ones that did not match.</span>
+    </div>
   </details>
 
   <section class="pick" id="pick" data-state="idle" hidden>
