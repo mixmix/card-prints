@@ -166,8 +166,9 @@ index.html?a=peach_peasant&b=5d3f7245d1bbf667dd9d4286
 
 Opening that link goes straight to Diff, pulls both cubes and resolves them
 without being asked — someone followed it to see the comparison, so it runs
-itself. Each side is still resolved on its own, in turn, so a name that needs
-attention stops at the cube it belongs to and the chooser waits as usual.
+itself. Both go at once, sharing the one paced request queue, and each settles
+on its own: a cube that comes back clean folds away while the other is still
+counting, and a name that needs attention stops at the cube it belongs to.
 **Copy link** puts the URL on the clipboard.
 
 A single cube shares as `?cube=peach_peasant`. That one only pulls the list,
