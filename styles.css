@@ -1,50 +1,135 @@
 :root{
-  --ground:#f2eee5; --panel:#fbf8f2; --sunk:#e8e2d5; --rule:#ded6c6;
-  --ink:#1f1c17; --mid:#6c655a; --faint:#948b7c;
-  --accent:#8a6a24; --accent-ink:#fdfaf3;
-  --w:#a08a48; --u:#2f6f9e; --b:#6a4f8c; --r:#b04a33; --g:#3e7a4c;
-  --m:#9a7a2a; --c:#6f7681; --l:#8a6a4a;
-  --tile:184px; --shadow:0 1px 2px rgba(60,48,25,.12), 0 6px 18px rgba(60,48,25,.10);
-}
-@media (prefers-color-scheme: dark){
-  :root:not([data-theme="light"]){
-    --ground:#141310; --panel:#1c1a16; --sunk:#232019; --rule:#2f2b23;
-    --ink:#efeadf; --mid:#a29a8a; --faint:#797263;
-    --accent:#d2ab60; --accent-ink:#1b1710;
-    --w:#e2d3a4; --u:#74b2df; --b:#ac8fd6; --r:#e08464; --g:#79c088;
-    --m:#e0bd68; --c:#b3bcc7; --l:#c09a70;
-    --shadow:0 1px 2px rgba(0,0,0,.5), 0 8px 22px rgba(0,0,0,.45);
-  }
-}
-:root[data-theme="dark"]{
+  color-scheme:dark;
   --ground:#141310; --panel:#1c1a16; --sunk:#232019; --rule:#2f2b23;
   --ink:#efeadf; --mid:#a29a8a; --faint:#797263;
   --accent:#d2ab60; --accent-ink:#1b1710;
   --w:#e2d3a4; --u:#74b2df; --b:#ac8fd6; --r:#e08464; --g:#79c088;
   --m:#e0bd68; --c:#b3bcc7; --l:#c09a70;
-  --shadow:0 1px 2px rgba(0,0,0,.5), 0 8px 22px rgba(0,0,0,.45);
+  --tile:184px; --shadow:0 1px 2px rgba(0,0,0,.5), 0 8px 22px rgba(0,0,0,.45);
+  --shadow-lift:0 6px 14px rgba(0,0,0,.55), 0 20px 44px rgba(0,0,0,.55);
+  /* rarity, as printed on the set symbol. Scryfall ships one flat SVG per set
+     rather than a symbol per rarity, so uncommon fakes its silver foil with a
+     horizontal sheen (the #silver gradient in index.html). */
+  --mythic:#d0561f; --rare:#c2a02c; --common:#171310; --special:#8b5fbf;
+
+  /* A still field of grain, so the ground reads as a surface rather than a
+     flat fill. fractalNoise gives an even film grain; stitchTiles makes the
+     tile seamless, so nothing seams at the 160px repeat. */
+  --grain:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)' opacity='.05'/%3E%3C/svg%3E");
+  /* barely-there lift from above, so the field has somewhere to fall away to */
+  --cast:radial-gradient(120% 70% at 50% -8%, rgba(210,171,96,.055), transparent 62%);
 }
 *{box-sizing:border-box}
+/* The environment is pinned to the viewport, not the document, so it holds
+   still while the page scrolls over it. */
+html{
+  background-color:var(--ground);
+  background-image:var(--grain), var(--cast);
+  background-attachment:fixed;
+}
 body{
-  margin:0; background:var(--ground); color:var(--ink);
+  margin:0; background:transparent; color:var(--ink);
   font:15px/1.5 "Inter var",system-ui,-apple-system,"Segoe UI",sans-serif;
   font-variant-numeric:tabular-nums;
 }
 .serif{font-family:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif}
 
+/* ---- views ---- */
+/* One document, two states: the list you paste into, and the gallery it
+   builds. The gallery keeps its scroll position and its controls while you go
+   back to the list, so editing is a detour rather than a reload. */
+body[data-view="list"] .bar,
+body[data-view="list"] main,
+body[data-view="list"] .note,
+body[data-view="list"] footer,
+body[data-view="gallery"] .setup{display:none}
+
+/* ---- the list ---- */
+.setup{max-width:64ch; margin:0 auto; padding:8vh 22px 64px}
+.lede{color:var(--mid); font-size:13.5px; margin:12px 0 20px; max-width:58ch}
+.lede a{color:var(--accent)}
+.paste{
+  display:block; width:100%; resize:vertical;
+  background:var(--panel); border:1px solid var(--rule); border-radius:10px;
+  color:var(--ink); font:inherit; font-size:13.5px; line-height:1.65;
+  padding:12px 14px; outline:none;
+}
+.paste::placeholder{color:var(--faint)}
+.paste:focus-visible{border-color:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
+.paste:disabled{color:var(--mid); cursor:default}
+
+.setup-bar{display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-top:14px}
+.go{
+  background:var(--accent); border:1px solid var(--accent); color:var(--accent-ink);
+  border-radius:8px; padding:9px 20px; font:inherit; font-size:12.5px; font-weight:600;
+  letter-spacing:1.4px; text-transform:uppercase; cursor:pointer;
+}
+.go:hover:not(:disabled){filter:brightness(1.08)}
+.go:disabled{opacity:.5; cursor:default}
+.go:focus-visible{outline:2px solid var(--accent); outline-offset:3px}
+.count{color:var(--faint); font-size:12px}
+
+/* ---- progress ---- */
+.progress{margin-top:20px}
+body[data-state="idle"] .progress{display:none}
+.track{height:5px; border-radius:3px; background:var(--sunk); overflow:hidden}
+.fill{height:100%; width:0; background:var(--accent); transition:width .25s ease}
+@media (prefers-reduced-motion:reduce){.fill{transition:none}}
+.phase{margin-top:8px; color:var(--mid); font-size:12px; min-height:1.4em}
+.phase .bad{color:var(--r)}
+
+/* ---- the verdict on each name ---- */
+.report:not(:empty){margin-top:22px}
+.sum{color:var(--mid); font-size:12.5px; margin:0}
+.sum b{color:var(--accent); font-weight:600}
+.checks{list-style:none; margin:10px 0 0; padding:0; display:flex; flex-direction:column; gap:1px}
+.check{
+  display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+  padding:8px 12px; background:var(--panel); border:1px solid var(--rule);
+  font-size:13px;
+}
+.check:first-child{border-radius:8px 8px 0 0}
+.check:last-child{border-radius:0 0 8px 8px}
+.check:only-child{border-radius:8px}
+.check + .check{border-top:0}
+.mark{font-size:13px; width:1em; flex:none; text-align:center}
+.check.alt .mark{color:var(--g)}
+.check.miss .mark{color:var(--r)}
+.check .who{flex:1; min-width:14ch}
+.check .who s{color:var(--faint); text-decoration-color:var(--faint)}
+.check .who b{color:var(--accent); font-weight:600}
+.check .why{color:var(--faint); font-size:12px}
+.check .tog{font-size:11.5px; padding:4px 9px}
+
+/* The way on is only offered once there is something to go on to. */
+#after{display:none}
+body[data-state="done"] #after{display:flex}
+
 /* ---- masthead ---- */
+/* The masthead has to be opaque to cover what scrolls under it, so it repeats
+   the environment. Both are viewport-anchored, so the grain lines up exactly
+   and no flat band appears across the top. */
 .bar{
-  position:sticky; top:0; z-index:30; background:var(--ground);
+  position:sticky; top:0; z-index:30;
+  background-color:var(--ground);
+  background-image:var(--grain), var(--cast);
+  background-attachment:fixed;
   border-bottom:1px solid var(--rule); padding:14px 22px 12px;
 }
 .brand{display:flex; align-items:baseline; gap:12px; flex-wrap:wrap}
+/* the masthead folds down to its title, so the gallery gets the height back */
+.chev{margin-left:auto; align-self:center; padding:6px 8px}
+.chev .i{width:15px; height:15px; transition:rotate .18s ease}
+body.slim .chev .i{rotate:-90deg}
+body.slim .controls{display:none}
+body.slim .bar{padding-bottom:11px}
+@media (prefers-reduced-motion:reduce){.chev .i{transition:none}}
 h1{
   font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
   font-size:22px; font-weight:600; margin:0; letter-spacing:.2px; text-wrap:balance;
 }
 .tally{color:var(--mid); font-size:12.5px; letter-spacing:.4px}
 .tally b{color:var(--accent); font-weight:600}
-.lede{color:var(--mid); font-size:12.5px; margin-top:3px; max-width:62ch}
 
 .controls{display:flex; flex-wrap:wrap; gap:7px; align-items:center; margin-top:12px}
 .field{
@@ -54,9 +139,15 @@ h1{
 .field::placeholder{color:var(--faint)}
 .field:focus-visible{border-color:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
 .tog{
+  display:inline-flex; align-items:center; gap:6px;
   background:var(--panel); border:1px solid var(--rule); color:var(--mid);
   border-radius:8px; padding:7px 11px; font:inherit; font-size:12.5px;
   cursor:pointer; white-space:nowrap;
+}
+/* line icons, drawn in whatever colour the control is currently wearing */
+.i{
+  width:13px; height:13px; flex:none; fill:none; stroke:currentColor;
+  stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round;
 }
 .tog:hover{color:var(--ink); border-color:var(--faint)}
 .tog[aria-pressed="true"]{background:var(--accent); border-color:var(--accent); color:var(--accent-ink); font-weight:600}
@@ -64,14 +155,17 @@ h1{
 .sizer{display:flex; gap:9px; align-items:center; background:var(--panel);
   border:1px solid var(--rule); border-radius:8px; padding:6px 11px; font-size:12.5px; color:var(--mid)}
 input[type=range]{accent-color:var(--accent); width:96px}
-.nav{display:flex; gap:4px; flex-wrap:wrap; margin-left:auto}
+.nav{display:flex; gap:3px; flex-wrap:wrap; margin-left:auto}
 .nav a{
-  text-decoration:none; font-size:11.5px; letter-spacing:.5px; padding:6px 9px;
-  border-radius:7px; color:var(--mid); border:1px solid transparent;
-  display:flex; align-items:center; gap:6px;
+  text-decoration:none; padding:5px; border-radius:8px;
+  border:1px solid transparent; display:flex; align-items:center;
 }
-.nav a:hover{color:var(--ink); border-color:var(--rule); background:var(--panel)}
-.pip{width:8px; height:8px; border-radius:50%; flex:none}
+.nav a:hover{border-color:var(--rule); background:var(--panel)}
+/* mana symbols come coloured, so they are drawn rather than tinted. The two
+   categories with no symbol of their own — multicolour and lands — take a
+   plain disc in the same gold and brown the rest of the page uses for them. */
+.pip{width:17px; height:17px; border-radius:50%; flex:none; display:block}
+.sect .pip{width:20px; height:20px}
 
 /* ---- colour sections ---- */
 .sect{
@@ -79,43 +173,71 @@ input[type=range]{accent-color:var(--accent); width:96px}
   font-size:11.5px; font-weight:600; letter-spacing:2.6px; text-transform:uppercase; color:var(--mid);
 }
 .sect::after{content:""; flex:1; height:1px; background:var(--rule)}
-.sect .pip{width:10px; height:10px}
 
 /* ---- rows ---- */
 .row{
   display:grid; grid-template-columns:198px 1fr; gap:18px;
   padding:15px 22px; border-bottom:1px solid var(--rule); align-items:start;
 }
-.rail{position:sticky; top:126px}
+/* the masthead's height is measured into --bar, so the rail keeps clear of it
+   whether the controls are showing, collapsed, or wrapped onto another line */
+.rail{position:sticky; top:calc(var(--bar, 126px) + 12px)}
 .title{
   font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
   font-size:16.5px; line-height:1.25; font-weight:600;
   border-left:3px solid var(--hue); padding-left:10px; text-wrap:balance;
 }
 .aka{color:var(--accent); font-size:11px; padding-left:13px; margin-top:3px; font-style:italic}
-.sub{color:var(--mid); font-size:11.5px; padding-left:13px; margin-top:4px}
-.count{color:var(--faint); font-size:11.5px; padding-left:13px; margin-top:6px}
-.count b{color:var(--mid); font-weight:600}
+
+/* ---- set symbols ---- */
+.sets{display:flex; flex-wrap:wrap; gap:9px; padding-left:13px; margin-top:11px}
+.sym{position:relative; display:block; width:24px; height:24px; --rar:var(--common)}
+.sym.r-mythic{--rar:var(--mythic)}
+.sym.r-rare{--rar:var(--rare)}
+.sym.r-common{--rar:var(--common)}
+.sym.r-special{--rar:var(--special)}
+.ico{display:block; width:100%; height:100%}
+.ico path{fill:var(--rar)}
+/* the silver sheen lives in the gradient def in index.html, since SVG fill
+   cannot take a CSS gradient */
+.sym.r-uncommon .ico path{fill:url(#silver)}
+/* common is near-black, so it alone is edged in white to lift it off the ground.
+   The shadow is repeated because each pass applies to the previous one's result,
+   compounding a faint 0.5px halo into a legible edge. */
+.sym.r-common .ico{
+  filter:drop-shadow(0 0 2px #fff);
+}
+.sym::after{
+  content:attr(data-set); position:absolute; bottom:calc(100% + 7px); left:50%; translate:-50% 0;
+  background:rgba(8,6,3,.94); color:#f6f1e6; border-radius:5px; padding:4px 8px;
+  font-size:10.5px; letter-spacing:.2px; white-space:nowrap; text-transform:capitalize;
+  opacity:0; pointer-events:none; transition:opacity .1s ease; z-index:20;
+}
+.sym:hover::after{opacity:1}
+@media (prefers-reduced-motion:reduce){.sym::after{transition:none}}
 
 .strip{
-  display:flex; gap:13px; overflow-x:auto; padding-bottom:8px;
+  display:flex; gap:13px; overflow-x:auto; padding:9px 0 12px; margin-top:-9px;
   scrollbar-width:thin; scrollbar-color:var(--rule) transparent;
 }
 .strip::-webkit-scrollbar{height:9px}
 .strip::-webkit-scrollbar-thumb{background:var(--rule); border-radius:5px}
 body.wrapped .strip{flex-wrap:wrap; overflow-x:visible}
 
+/* corner radius tracks the size slider: 6px at its 112px minimum, 16px at 340px */
 .card{
   flex:none; width:var(--tile); text-decoration:none; color:inherit; display:block;
-  border-radius:9px;
+  --radius:calc(6px + (var(--tile) - 112px) * 0.0439);
+  border-radius:var(--radius);
 }
 .card:focus-visible{outline:2px solid var(--accent); outline-offset:3px}
-.shot{position:relative; border-radius:calc(var(--tile)/26); overflow:hidden;
+.shot{position:relative; border-radius:var(--radius); overflow:hidden;
   background:var(--sunk); box-shadow:var(--shadow); aspect-ratio:488/680}
 .shot img{width:100%; height:100%; display:block; object-fit:cover}
-.card:hover .shot{transform:translateY(-3px)}
-.shot{transition:transform .14s ease}
-@media (prefers-reduced-motion:reduce){.shot{transition:none} .card:hover .shot{transform:none}}
+/* hover deepens the shadow only — the tile holds its size and place */
+.shot{transition:box-shadow .16s ease}
+.card:hover .shot{box-shadow:var(--shadow-lift)}
+@media (prefers-reduced-motion:reduce){.shot{transition:none}}
 
 /* hover plate — carries the facts when captions are hidden */
 .plate{

@@ -4,28 +4,85 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Card Print Gallery</title>
+<!-- Scryfall's own CSP guidance, narrowed to what this page actually touches:
+     the API is reached with fetch (connect-src), card images and set symbols
+     come off the *.scryfall.io asset origins, and the symbols are fetched as
+     well as drawn, so that host needs both. 'unsafe-inline' is for style
+     attributes on generated markup, not for a stylesheet. -->
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'none';
+  connect-src 'self' https://api.scryfall.com https://*.scryfall.io;
+  img-src 'self' https://*.scryfall.io data:;
+  script-src 'self';
+  style-src 'self' 'unsafe-inline';
+  base-uri 'none';
+  form-action 'none'">
 <link rel="stylesheet" href="styles.css">
 <script type="module" src="js/main.js"></script>
 </head>
-<body>
+<body data-view="list" data-state="idle">
+<!-- referenced by set symbols printed at uncommon; SVG fill takes a paint
+     server like this but not a CSS gradient -->
+<svg width="0" height="0" aria-hidden="true" focusable="false" style="position:absolute">
+  <defs>
+    <linearGradient id="silver" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#5f686e"/>
+      <stop offset=".22" stop-color="#8e989f"/>
+      <stop offset=".5" stop-color="#dfe6ea"/>
+      <stop offset=".78" stop-color="#8e989f"/>
+      <stop offset="1" stop-color="#5f686e"/>
+    </linearGradient>
+  </defs>
+</svg>
+
+<section class="setup" id="view-list" aria-label="Card list">
+  <h1>Card Print Gallery</h1>
+  <p class="lede">Paste a list of Magic cards, one a line, and this will look up
+    every English paper printing of each from <a href="https://scryfall.com">Scryfall</a>.
+    Quantities and set hints are ignored, so a decklist works as it is.</p>
+  <textarea id="list" class="paste" rows="14" spellcheck="false" autocomplete="off"
+    aria-label="Card names, one a line"
+    placeholder="Thraben Inspector&#10;4 Lightning Bolt&#10;Birds of Paradise (rvr) 172"></textarea>
+  <div class="setup-bar">
+    <button class="go" id="load">Load</button>
+    <span class="count" id="count"></span>
+  </div>
+  <div class="progress" id="progress">
+    <div class="track"><div class="fill" id="bar"></div></div>
+    <div class="phase" id="phase"></div>
+  </div>
+  <div class="report" id="report"></div>
+  <div class="setup-bar" id="after">
+    <button class="go" id="go-on">Continue</button>
+    <span class="count">Load again after editing the list, or carry on with what was found.</span>
+  </div>
+</section>
+
 <header class="bar">
   <div class="brand">
     <h1>Card Print Gallery</h1>
     <div class="tally" id="tally"></div>
+    <button class="tog chev" id="t-bar" aria-expanded="true" aria-controls="controls"
+      aria-label="Hide controls" title="Hide controls">
+      <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8.5 12 15.5 19 8.5"/></svg>
+    </button>
   </div>
-  <div class="lede">Every English paper printing of each card, oldest to newest, grouped by colour. Hover a card for its set and artist; click through to Scryfall.</div>
-  <div class="controls">
+  <div class="controls" id="controls">
+    <button class="tog" id="edit">
+      <svg class="i" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 20h4.1L19.3 8.8a2.1 2.1 0 0 0-3-3L5.1 17V20Z"/>
+        <path d="M13.8 7.3l3 3"/>
+      </svg>Edit list</button>
     <input type="search" id="q" class="field" placeholder="Filter by card, set or artist" autocomplete="off" aria-label="Filter cards">
     <button class="tog" id="t-uniq" aria-pressed="true">Unique arts</button>
     <button class="tog" id="t-detail" aria-pressed="false">Print details</button>
     <button class="tog" id="t-wrap" aria-pressed="false">Wrap rows</button>
     <label class="sizer">Size <input type="range" id="size" min="112" max="340" value="184" aria-label="Card size"></label>
-    <button class="tog" id="t-theme">Switch theme</button>
     <nav class="nav" id="nav" aria-label="Jump to colour"></nav>
   </div>
 </header>
 <main id="out"></main>
 <div class="note" id="note"></div>
-<footer>Card data and images from the <a href="https://scryfall.com">Scryfall</a> API; artwork &copy; Wizards of the Coast and the credited artists. Prices are indicative USD market values at build time.</footer>
+<footer>Card data and images from the <a href="https://scryfall.com">Scryfall</a> API; artwork &copy; Wizards of the Coast and the credited artists. Prices are indicative USD market values.</footer>
 </body>
 </html>
