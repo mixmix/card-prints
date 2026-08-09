@@ -5,11 +5,14 @@
 import * as view from './render.js';
 import * as cc from './cubecobra.js';
 import * as api from './scryfall.js';
-import {parse, resolveNames, plan, printsFor, symbolsFor, compare, selection, PHASE} from './data.js';
+import * as store from './store.js';
+import {parse, resolveNames, plan, printsFor, cachedPrints, symbolsFor, compare, selection, PHASE}
+  from './data.js';
 import {track} from './progress.js';
 
 const $ = id => document.getElementById(id);
-const SAVED = 'cp:list', CUBES = 'cp:cubes', MODE = 'cp:mode';
+/* The keys, and the only thing that touches localStorage, live in store.js. */
+const {save, LIST, TYPED, CUBES, MODE} = store;
 const SAMPLE = ['Thraben Inspector', 'Lightning Bolt', 'Birds of Paradise',
   'Delver of Secrets', 'Wear // Tear', 'Aetherling'].join('\n');
 
@@ -22,7 +25,9 @@ function toggle(id, fn){
   });
 }
 
-const save = (key, value) => { try { localStorage.setItem(key, value); } catch {} };
+/* How many units are mid-run. The mode strip is locked while any of them is,
+   so it is a count rather than a flag. */
+let working = 0;
 
 /* A unit of work: one list of names with its own button, progress and report.
    The typed list, each cube being compared and the bucket loader are all the
@@ -62,15 +67,19 @@ function unit(prefix, rootId){
       Object.assign(u.words, words);
       if (s === 'working' && u.root.contains(document.activeElement))
         u.phase.focus?.({preventScroll: true});
+      const was = root.dataset.state === 'working', now = s === 'working';
       root.dataset.state = s;
-      root.toggleAttribute('aria-busy', s === 'working');
+      root.toggleAttribute('aria-busy', now);
       for (const c of root.querySelectorAll('textarea, input, button'))
-        c.disabled = s === 'working';
+        c.disabled = now;
       /* Nothing in flight can be cancelled, so leaving the screen mid-run
-         would let a finished fetch write into a pane nobody is looking at. */
+         would let a finished fetch write into a pane nobody is looking at.
+         Counted, because two cubes can be resolving at once and the first to
+         finish must not unlock the screen out from under the second. */
+      if (now !== was) working += now ? 1 : -1;
       for (const id of ['mode-text', 'mode-cube', 'mode-view', 'mode-diff'])
-        $(id).disabled = s === 'working';
-      u.go.textContent = s === 'working' ? u.words.busy : u.words.idle;
+        $(id).disabled = working > 0;
+      u.go.textContent = now ? u.words.busy : u.words.idle;
     },
 
     /* Progress and the tick/cross report both land here, whichever phases ran. */
@@ -206,6 +215,33 @@ export async function init(){
     }
   }
 
+  /* Whatever the cache already holds goes in before the first paint, so a list
+     looked at this week opens complete rather than filling in again under the
+     reader. Only the misses are left in `waiting`, which is what keeps the
+     batches fill() sends out full. */
+  function hydrate(){
+    const got = cachedPrints([...waiting], data.src);
+    if (!got.size) return;
+    const codes = new Set();
+    for (const [id, {prints, arts}] of got){
+      const card = byId(id);
+      if (!card) continue;
+      card.prints = prints;
+      card.arts = arts;
+      data.db.stats.prints += prints.length;
+      data.db.stats.arts += arts;
+      if (!prints.length) data.db.dropped.push(card.name);
+      for (const p of prints) codes.add(p.s);
+      waiting.delete(id);
+    }
+    /* The symbols are not cached whole — only the drawings are — so the set
+       names still cost one request. It lands after the gallery is drawn, which
+       is why these rows are redrawn rather than waited for. */
+    symbolsFor([...codes], data.sets)
+      .then(added => { if (added.length) redraw([...got.keys()]); })
+      .catch(err => console.error(err));
+  }
+
   /* Opens the gallery on a resolved list and starts filling it in. */
   function open(resolved, alts, {missing = [], diffCtx = null} = {}){
     const cards = plan(resolved, alts);
@@ -214,6 +250,7 @@ export async function init(){
       src: {}, sets: data?.sets ?? {},
     };
     waiting = new Set(cards.map(c => c.id));
+    hydrate();
     toGallery(diffCtx);
     progress();
     show('gallery');
@@ -268,6 +305,28 @@ export async function init(){
     u.count.textContent = n ? `${n} name${n === 1 ? '' : 's'}` : '';
   };
 
+  /* ---- what has been looked up before ---- */
+
+  /* Every cube ever fetched, offered under all three cube fields. Drawn into
+     each of them rather than into one shared place, because the thing you want
+     is next to the field you are filling in. */
+  const SEEN_FIELD = {'cube-seen': 'cube', 'a-seen': 'a-src', 'b-seen': 'b-src'};
+
+  function paintSeen(){
+    const html = view.cubeChips(store.seen());
+    for (const id of Object.keys(SEEN_FIELD)) $(id).innerHTML = html;
+  }
+
+  /* The last list typed by hand, offered back once something else has taken the
+     textarea over — a longer memory than the Undo on the fetch note, which only
+     lasts until the next one. Nothing to offer while it is already there. */
+  function paintTyped(){
+    const kept = store.get(TYPED) || '';
+    const n = parse(kept).length;
+    $('typed-back').innerHTML =
+      n && kept.trim() !== load.list.value.trim() ? view.typedChip(n) : '';
+  }
+
   /* ---- fetching a cube ---- */
 
   /* Fetch fills a textarea and stops there. The names stay editable and the
@@ -287,6 +346,10 @@ export async function init(){
       counted(u);
       note.innerHTML = view.pasted({title: got.title, count: names.length, replaced: !!before.trim()});
       note.dataset.before = before;
+      /* One place records it, since all three fields come through here. */
+      store.sawCube(got);
+      paintSeen();
+      paintTyped();
       onTitle?.(got);
       return got;
     } catch (err) {
@@ -304,7 +367,7 @@ export async function init(){
     const names = parse(load.list.value);
     if (!names.length){ load.list.focus(); return; }
     load.list.value = names.join('\n');
-    save(SAVED, load.list.value);
+    save(LIST, load.list.value);
     load.reset();
     pending = null;
     load.state('working', {busy: 'Loading…', idle: 'Load'});
@@ -508,7 +571,15 @@ export async function init(){
   $('cube-get').addEventListener('click', () =>
     fetchCube('cube', 'cube-note', load, got => { cubeId.one = got.id; link(); }));
   $('cube').addEventListener('input', () => { cubeId.one = null; link(); });
-  $('list').addEventListener('input', () => { save(SAVED, $('list').value); counted(load); });
+  /* Only what someone typed or pasted here counts as their list: a cube fetch
+     writes the textarea's value directly and Load saves what it found, so
+     neither can be the last word on what you wrote. */
+  $('list').addEventListener('input', () => {
+    save(LIST, $('list').value);
+    save(TYPED, $('list').value);
+    counted(load);
+    paintTyped();
+  });
 
   $('share').addEventListener('click', async () => {
     const note = $('share-note'), said = note.textContent;
@@ -555,7 +626,7 @@ export async function init(){
   });
   $('pick-load').addEventListener('click', runPick);
 
-  wireRename(load, () => { save(SAVED, load.list.value); counted(load); });
+  wireRename(load, () => { save(LIST, load.list.value); counted(load); });
 
   /* Taking up a suggested name settles it there and then. The card behind the
      suggestion is already in hand — the fuzzy lookup that found it is what
@@ -604,10 +675,68 @@ export async function init(){
     const note = btn.closest('[id$="note"]');
     const u = note.id === 'cube-note' ? load : sides[note.id[0]];
     u.list.value = note.dataset.before ?? '';
-    if (u === load) save(SAVED, u.list.value);
+    if (u === load) save(LIST, u.list.value);
     else stale(note.id[0]);
     counted(u);
     note.innerHTML = '';
+    paintTyped();
+  });
+
+  /* A remembered cube fills its field and stops there, exactly as if it had
+     been typed in — so the same bookkeeping the field's own input handler does
+     has to happen too. Fetch is left to be pressed: filling a field is a
+     suggestion, fetching is a decision. */
+  document.addEventListener('click', e => {
+    const btn = e.target.closest('[data-cube]');
+    if (!btn) return;
+    const field = $(SEEN_FIELD[btn.closest('.seen').id]);
+    field.value = btn.dataset.cube;
+    if (field.id === 'cube') cubeId.one = null;
+    else { cubeId[field.id[0]] = null; remember(); }
+    link();
+    field.nextElementSibling.focus({preventScroll: true});
+  });
+
+  /* The typed list comes back into the textarea it was written in, which means
+     switching to the screen that holds it if we are not there. */
+  document.addEventListener('click', e => {
+    if (!e.target.closest('[data-typed]')) return;
+    load.list.value = store.get(TYPED) || '';
+    save(LIST, load.list.value);
+    counted(load);
+    $('cube-note').innerHTML = '';
+    paintTyped();
+    load.list.focus({preventScroll: true});
+  });
+
+  /* ---- the cache ---- */
+
+  /* Two copies of the same text, one on the setup screens and one in the
+     gallery footer, so it is reachable from wherever the doubt arises. The size
+     is worked out on hover rather than kept up to date: it changes with every
+     batch that lands, and nobody is watching it until they point at it. */
+  const cacheHint = btn => { btn.title = view.cacheSize(store.size()); };
+
+  document.addEventListener('pointerover', e => {
+    const btn = e.target.closest('[data-clear-cache]');
+    if (btn) cacheHint(btn);
+  });
+  document.addEventListener('focusin', e => {
+    const btn = e.target.closest('[data-clear-cache]');
+    if (btn) cacheHint(btn);
+  });
+
+  /* Clearing what is stored deliberately leaves what is on screen alone: the
+     gallery you are looking at was already paid for, and taking it away would
+     make the control feel like a mistake. */
+  document.addEventListener('click', e => {
+    const btn = e.target.closest('[data-clear-cache]');
+    if (!btn) return;
+    store.clear();
+    const said = btn.textContent;
+    btn.textContent = 'Cache cleared';
+    cacheHint(btn);
+    setTimeout(() => { btn.textContent = said; }, 2500);
   });
 
   /* ---- restore ---- */
@@ -619,10 +748,10 @@ export async function init(){
     }));
   }
 
-  load.list.value = localStorage.getItem(SAVED) ?? SAMPLE;
+  load.list.value = store.get(LIST) ?? SAMPLE;
   counted(load);
   try {
-    const kept = JSON.parse(localStorage.getItem(CUBES) || 'null');
+    const kept = JSON.parse(store.get(CUBES) || 'null');
     for (const key of ['a', 'b']){
       if (!kept?.[key]) continue;
       $(key + '-src').value = kept[key].src || '';
@@ -631,6 +760,8 @@ export async function init(){
       counted(sides[key]);
     }
   } catch {}
+  paintSeen();
+  paintTyped();
 
   load.state('idle');
 
@@ -654,7 +785,10 @@ export async function init(){
       });
       if (pull) pulled.push(key);
     }
-    for (const key of pulled) await runSide(key);
+    /* Both at once: they share one paced request queue, so the second cube is
+       not waiting on the first — and whichever finishes first settles and folds
+       away on its own while the other carries on. */
+    await Promise.all(pulled.map(key => runSide(key)));
   } else if (shared.one){
     mode('cube');
     $('cube').value = shared.one;

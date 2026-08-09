@@ -30,21 +30,40 @@ export const CARDS_PER_SEARCH = 15;
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-/* Every call is threaded through one promise chain, so concurrency cannot
-   exceed the published rate however many callers are in flight. `penalty`
-   widens the gap for the rest of the session once we have been warned:
-   Scryfall blocks applications that keep overloading it after a 429. */
-let chain = Promise.resolve(), last = 0, penalty = 0;
+/* Every call is threaded through one promise chain, so however many callers are
+   in flight, requests leave no faster than the published rate.
+
+   What is rationed is when a request may *start*, not when the one before it
+   came back. A /cards/collection round trip takes about 2.6 seconds and the
+   limit allows one every 550ms, so waiting for each answer before beginning the
+   next gap left the connection idle four fifths of the time and cost four
+   requests' worth of rate we were entitled to. Requests now overlap; the gap
+   still governs the only thing Scryfall measures.
+
+   `penalty` widens the gap for the rest of the session once we have been
+   warned, and `hold` stops the whole queue during a lockout — with several
+   requests in flight, letting the rest carry on leaving is how a warning
+   becomes a ban. */
+const IN_FLIGHT = 8;   // a slow day at Scryfall must not become a pile-up here
+let chain = Promise.resolve(), last = 0, penalty = 0, hold = 0, live = 0;
 
 function queued(gap, fn){
-  const run = chain.then(async () => {
-    const wait = last + gap + penalty - Date.now();
-    if (wait > 0) await sleep(wait);
+  const slot = chain.then(async () => {
+    for (;;){
+      const wait = Math.max(last + gap + penalty, hold) - Date.now();
+      if (wait > 0){ await sleep(wait); continue; }   // hold may move while we sleep
+      if (live >= IN_FLIGHT){ await sleep(50); continue; }
+      break;
+    }
     last = Date.now();
-    return fn();
   });
-  chain = run.then(() => {}, () => {});
-  return run;
+  /* The next caller waits for the slot, not for the request — and a failing
+     request no longer has to be caught to keep the chain alive. */
+  chain = slot;
+  return slot.then(async () => {
+    live++;
+    try { return await fn(); } finally { live--; }
+  });
 }
 
 async function request(path, {gap = CARD_GAP, ...init} = {}){
@@ -59,8 +78,8 @@ async function request(path, {gap = CARD_GAP, ...init} = {}){
         if (attempt === TRIES) throw new Error(
           'Scryfall is rate limiting this browser. Give it a minute and try again.');
         penalty = Math.min(penalty + 250, 2000);
+        hold = Math.max(hold, Date.now() + BACKOFF_429);   // stops the queue, not just us
         await sleep(BACKOFF_429);
-        last = Date.now();
         continue;
       }
       if (res.status >= 500 && attempt < TRIES){

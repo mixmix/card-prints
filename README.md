@@ -29,7 +29,7 @@ Only the name lookup is worth waiting for — it is what decides whether the lis
 is right, and it is quick. It runs in two phases, each with its own tally:
 
 ```
-✓  Finding cards               20 of 22 matched
+✓  Checking card names         20 of 22 matched
 ·  Checking alternate names    2 of 3 names
 ```
 
@@ -112,19 +112,37 @@ Once both are settled:
 WHAT DO YOU WANT TO SEE?
 457 shared · 17 only in A · 83 only in B
 
-( ) ◕◔  In both cubes                                    457
-        peach peasant cube ∩ The Peasant Cube 2026
-        ▸ Preview 457 cards
-( ) ◑◯  Only in peach peasant cube                        17
-        missing from The Peasant Cube 2026
-( ) ◯◐  Only in The Peasant Cube 2026                     83
-        missing from peach peasant cube
+( ) In both cubes                                    457  ◕
+    peach peasant cube ∩ The Peasant Cube 2026
+    ▸ Preview 457 cards
+( ) Only in peach peasant cube                        17  ◖
+    missing from The Peasant Cube 2026
+( ) Only in The Peasant Cube 2026                     83  ◗
+    missing from peach peasant cube
 ```
 
-Each option carries a two-circle Venn with the slice it would show filled in —
-A on the left, B on the right, the same way round every time. It says what the
-label says and says it faster, which is also why it is marked decorative and
-never announced.
+**The Venn on the right is drawn to scale.** All three rows show the same two
+circles — only the shading moves — and the drawing is the numbers rather than a
+picture of them: each circle's area is that cube's card count, and the lens
+between them is what the two share. So two cubes that barely overlap look it,
+and the pair above, which shares 96% of the smaller one, comes out as one
+circle with a sliver down each side. A on the left, B on the right, every time.
+
+Radii go as the square root of the count over π, so an area *is* a count and
+the overlap can be solved for directly. There is no closed form for the
+distance between the centres, so it is found by bisection — the lens shrinks
+steadily as the circles part, which pins the answer between full containment
+and no contact.
+
+The one concession: a crescent thinner than about three pixels reads as no
+crescent at all, which would leave two of the three options looking identical
+and empty. Where that would happen the circles are pulled apart until each
+slice a cube actually has can be seen. It understates the overlap rather than
+inventing one, and for the cubes above it draws 90% shared against a true
+96% — everything else, including both circle areas, stays exact.
+
+It says what the label says and says it faster, which is also why it is marked
+decorative and never announced.
 
 Each preview opens in place into its own scrolling box, so a 457-card list
 neither moves the page nor runs off the end of it. Choosing a slice and

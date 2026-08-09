@@ -75,6 +75,37 @@ export const cubeStat = ({names, missing = 0, alts = 0}) => {
     + (said.length ? `, ${said.join(', ')}` : ', all matched');
 };
 
+/* ---- what is remembered ---- */
+
+/* The cubes that have been pulled before, offered under every cube field.
+   Clicking one fills the field and stops there — the field is what gets
+   fetched, the same way the textarea is what gets loaded — so these are
+   suggestions rather than shortcuts past a step. */
+export const cubeChips = list => list.length
+  ? `<span class="was">Looked up before</span>`
+    + list.map(c => `<button class="tog" data-cube="${esc(c.id)}" title="${esc(c.id)}"
+        >${esc(c.title || c.id)}</button>`).join('')
+  : '';
+
+/* The last list typed by hand, offered back after something else has taken the
+   textarea over. Only shown when there is one and it is not already there. */
+export const typedChip = count =>
+  `<span class="was">Your last typed list</span>
+   <button class="tog" data-typed>${count} name${count === 1 ? '' : 's'}</button>`;
+
+/* What the cache is costing, said on hover over Clear cache. Megabytes past a
+   megabyte, since past that point the second decimal is noise. */
+export function cacheSize({bytes, names, prints, symbols}){
+  if (!bytes) return 'Nothing cached yet';
+  const size = bytes >= 1024 * 1024
+    ? (bytes / 1024 / 1024).toFixed(1) + ' MB'
+    : Math.max(1, Math.round(bytes / 1024)) + ' KB';
+  const said = [[names, 'card name'], [prints, 'printing list'], [symbols, 'set symbol']]
+    .filter(([n]) => n)
+    .map(([n, what]) => `${n} ${what}${n === 1 ? '' : 's'}`);
+  return `Cached: ${size} · ${said.join(' · ')}`;
+}
+
 /* The three ways to look at two cubes. Named in both directions, because
    "only in X" and "missing from Y" are the same fact and different people
    reach for different halves of it.
@@ -82,22 +113,92 @@ export const cubeStat = ({names, missing = 0, alts = 0}) => {
    The radio row and the preview are siblings: a control inside a <summary>
    would toggle the disclosure when clicked. */
 
-/* Two overlapping circles with the slice this option would show filled in —
-   A on the left, B on the right, the same way round on every row. It says the
-   same thing as the label beside it and says it faster, which also makes it
-   decorative: nothing here is announced. The clip path and masks are declared
-   once in the document; only which circle gets painted differs. */
-const SLICE = {
-  both:  '<circle class="on" cx="17" cy="14" r="11" clip-path="url(#venn-and)"/>',
-  onlyA: '<circle class="on" cx="17" cy="14" r="11" mask="url(#venn-not-b)"/>',
-  onlyB: '<circle class="on" cx="31" cy="14" r="11" mask="url(#venn-not-a)"/>',
+/* One picture of the comparison, drawn to scale, with each option shading the
+   part of it that option would show. Each circle's area is its cube's card
+   count and the lens between them is what the two share, so the diagram
+   carries the counts rather than illustrating them — two cubes that barely
+   overlap look it. A on the left, B on the right, the same way round on every
+   row. It says what the label says and says it faster, which is also why it is
+   decorative: nothing here is announced. */
+
+/* The area two circles have in common: two circular segments back to back. */
+const lens = (r1, r2, d) => {
+  if (d >= r1 + r2) return 0;
+  if (d <= Math.abs(r1 - r2)) return Math.PI * Math.min(r1, r2) ** 2;
+  const a1 = Math.acos((d * d + r1 * r1 - r2 * r2) / (2 * d * r1));
+  const a2 = Math.acos((d * d + r2 * r2 - r1 * r1) / (2 * d * r2));
+  return r1 * r1 * (a1 - Math.sin(a1) * Math.cos(a1))
+       + r2 * r2 * (a2 - Math.sin(a2) * Math.cos(a2));
 };
 
-const venn = key => `<svg class="venn" viewBox="0 0 48 28" aria-hidden="true" focusable="false">
-    ${SLICE[key]}
-    <circle class="ring" cx="17" cy="14" r="11"/>
-    <circle class="ring" cx="31" cy="14" r="11"/>
-  </svg>`;
+/* How far apart the centres have to be for the lens to come out at `want`.
+   There is no closed form, but the lens shrinks steadily as the circles part,
+   so the answer is pinned between full containment and no contact at all. */
+function separation(r1, r2, want){
+  let lo = Math.abs(r1 - r2), hi = r1 + r2;
+  if (want >= lens(r1, r2, lo)) return lo;      // one cube contains the other
+  if (want <= 0) return hi * 1.05;              // nothing shared — stand them apart
+  for (let i = 0; i < 50; i++){
+    const mid = (lo + hi) / 2;
+    if (lens(r1, r2, mid) > want) lo = mid; else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+const TALL = 36, PAD = 1;    // drawn height, and room for the stroke either side
+const THIN = 6;              // the narrowest crescent still worth drawing
+
+/* Radii go as the square root of the count, so it is the areas that compare —
+   over π, so that an area *is* a count and the lens can be solved for `both`
+   directly. The whole thing is then scaled to a fixed height and cropped to
+   what it covers, which is why the three rows come out the same size. */
+function geometry({both, onlyA, onlyB}){
+  const size = n => Math.sqrt(n / Math.PI);
+  const r1 = size(both + onlyA), r2 = size(both + onlyB);
+  if (!r1 || !r2) return null;
+  const s = TALL / (2 * Math.max(r1, r2));
+
+  /* Two cubes that are nearly the same cube draw as nearly the same circle,
+     and a crescent under a couple of pixels reads as no crescent at all —
+     which would leave two of the three options looking identical and empty.
+     So the circles are pulled apart far enough for each slice a cube actually
+     has to be visible. It understates the overlap rather than inventing one,
+     and only bites where the exact drawing would say nothing. */
+  const floor = Math.min(
+    Math.max(onlyA ? THIN / s + r2 - r1 : 0, onlyB ? THIN / s + r1 - r2 : 0),
+    (r1 + r2) * .9);
+  const d = Math.max(separation(r1, r2, both), floor);
+
+  /* Either circle can be the outermost one — a cube can contain the other. */
+  const left = Math.min(-r1, d - r2), right = Math.max(r1, d + r2);
+  return {
+    a: {x: PAD + s * -left, r: s * r1},
+    b: {x: PAD + s * (d - left), r: s * r2},
+    cy: PAD + TALL / 2,
+    w: 2 * PAD + s * (right - left),
+    h: 2 * PAD + TALL,
+  };
+}
+
+/* The slice each option shades: the lens, or one circle with the other cut
+   out. Clip paths and masks resolve by id, so each carries its own. */
+function venn(key, g){
+  if (!g) return '';
+  const at = (c, more) => `<circle cx="${c.x.toFixed(2)}" cy="${g.cy.toFixed(2)}" r="${c.r.toFixed(2)}" ${more}/>`;
+  const id = `venn-${key}`, hole = key === 'onlyB' ? g.a : g.b;
+  const box = `width="${g.w.toFixed(2)}" height="${g.h.toFixed(2)}"`;
+  const defs = key === 'both'
+    ? `<clipPath id="${id}">${at(g.b, '')}</clipPath>`
+    : `<mask id="${id}" maskUnits="userSpaceOnUse" x="0" y="0" ${box}>
+         <rect ${box} fill="#fff"/>${at(hole, 'fill="#000"')}</mask>`;
+  const paint = key === 'both'
+    ? at(g.a, `class="on" clip-path="url(#${id})"`)
+    : at(key === 'onlyA' ? g.a : g.b, `class="on" mask="url(#${id})"`);
+
+  return `<svg class="venn" viewBox="0 0 ${g.w.toFixed(2)} ${g.h.toFixed(2)}"
+      aria-hidden="true" focusable="false"><defs>${defs}</defs>
+      ${paint}${at(g.a, 'class="ring"')}${at(g.b, 'class="ring"')}</svg>`;
+}
 
 export function buckets(list, a, b){
   const say = {
@@ -105,14 +206,19 @@ export function buckets(list, a, b){
     onlyA: [`Only in <b>${esc(a)}</b>`, `missing from ${esc(b)}`],
     onlyB: [`Only in <b>${esc(b)}</b>`, `missing from ${esc(a)}`],
   };
+  /* All three rows draw the same two circles — only the shading differs, which
+     is what makes them read as one picture seen three ways. */
+  const n = Object.fromEntries(list.map(({key, names}) => [key, names.length]));
+  const g = geometry({both: n.both || 0, onlyA: n.onlyA || 0, onlyB: n.onlyB || 0});
+
   return list.map(({key, names}) => {
     const [what, who] = say[key];
     return `<li class="bucket">
       <label class="pick-row">
         <input type="radio" name="bucket" value="${key}"${names.length ? '' : ' disabled'}>
-        ${venn(key)}
         <span class="what">${what}<span class="who">${who}</span></span>
         <span class="n">${names.length}</span>
+        ${venn(key, g)}
       </label>
       ${names.length ? `<details class="peek">
         <summary>Preview ${names.length} card${names.length === 1 ? '' : 's'}</summary>

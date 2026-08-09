@@ -22,13 +22,10 @@
 <script type="module" src="js/main.js"></script>
 </head>
 <body data-view="list">
-<!-- Shared paint and geometry. A clip path and a mask are resolved in the user
-     space of whatever references them, so they can be declared once here and
-     used by every Venn on the page rather than repeated inside each one. -->
+<!-- referenced by set symbols printed at uncommon; SVG fill takes a paint
+     server like this but not a CSS gradient -->
 <svg width="0" height="0" aria-hidden="true" focusable="false" style="position:absolute">
   <defs>
-    <!-- referenced by set symbols printed at uncommon; SVG fill takes a paint
-         server like this but not a CSS gradient -->
     <linearGradient id="silver" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0" stop-color="#5f686e"/>
       <stop offset=".22" stop-color="#8e989f"/>
@@ -36,15 +33,6 @@
       <stop offset=".78" stop-color="#8e989f"/>
       <stop offset="1" stop-color="#5f686e"/>
     </linearGradient>
-
-    <!-- the two circles of the bucket Venn: A on the left, B on the right -->
-    <clipPath id="venn-and"><circle cx="31" cy="14" r="11"/></clipPath>
-    <mask id="venn-not-b" maskUnits="userSpaceOnUse" x="0" y="0" width="48" height="28">
-      <rect width="48" height="28" fill="#fff"/><circle cx="31" cy="14" r="11" fill="#000"/>
-    </mask>
-    <mask id="venn-not-a" maskUnits="userSpaceOnUse" x="0" y="0" width="48" height="28">
-      <rect width="48" height="28" fill="#fff"/><circle cx="17" cy="14" r="11" fill="#000"/>
-    </mask>
   </defs>
 </svg>
 
@@ -81,6 +69,10 @@
     <button class="tog" id="cube-get">Fetch</button>
   </div>
   <div class="count said" id="cube-note" data-pane="cube" role="status"></div>
+  <!-- Cubes pulled before, and the list last typed here: both are filled in
+       rather than acted on, so they sit above the thing they would fill. -->
+  <div class="seen" id="cube-seen" data-pane="cube"></div>
+  <div class="seen" id="typed-back"></div>
 
   <textarea id="list" class="paste" rows="14" spellcheck="false" autocomplete="off"
     aria-label="Card names, one a line"
@@ -122,6 +114,7 @@
       <button class="tog" id="a-get">Fetch</button>
     </div>
     <div class="count said" id="a-note" role="status"></div>
+    <div class="seen" id="a-seen"></div>
     <textarea id="a-list" class="paste" rows="6" spellcheck="false" autocomplete="off"
       aria-label="Cube A card names, one a line"></textarea>
     <div class="setup-bar">
@@ -152,6 +145,7 @@
       <button class="tog" id="b-get">Fetch</button>
     </div>
     <div class="count said" id="b-note" role="status"></div>
+    <div class="seen" id="b-seen"></div>
     <textarea id="b-list" class="paste" rows="6" spellcheck="false" autocomplete="off"
       aria-label="Cube B card names, one a line"></textarea>
     <div class="setup-bar">
@@ -180,6 +174,10 @@
     </div>
   </section>
 </div>
+
+<!-- Names and printings are kept for a week so a list looked at twice is only
+     fetched once. Hovering says how much that is costing. -->
+<p class="crumb"><button class="link" data-clear-cache>Clear cache</button></p>
 </section>
 
 <header class="bar" data-pane="gallery">
@@ -209,6 +207,7 @@
 </header>
 <main id="out" data-pane="gallery"></main>
 <div class="note" id="note" data-pane="gallery"></div>
-<footer data-pane="gallery">Card data and images from the <a href="https://scryfall.com">Scryfall</a> API; artwork &copy; Wizards of the Coast and the credited artists. Prices are indicative USD market values.</footer>
+<footer data-pane="gallery">Card data and images from the <a href="https://scryfall.com">Scryfall</a> API; artwork &copy; Wizards of the Coast and the credited artists. Prices are indicative USD market values.
+<button class="link" data-clear-cache>Clear cache</button></footer>
 </body>
 </html>

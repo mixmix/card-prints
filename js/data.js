@@ -2,6 +2,7 @@
    resolve the names, fetch every printing, then group, index and sort them. */
 
 import * as api from './scryfall.js';
+import * as store from './store.js';
 
 /* Which card this is, regardless of the name it was listed under. The gallery
    groups rows by it and the cube diff buckets by it; they have to agree, so
@@ -65,18 +66,52 @@ async function lookup(names){
   return {cards: pair(names.filter(n => !gone.has(n)), found), missed};
 }
 
+const chunk = (list, size) => {
+  const out = [];
+  for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
+  return out;
+};
+
 /* Resolution runs in three passes, each cheaper per name than the last is
-   forgiving, so almost everything is settled by the first bulk request. */
+   forgiving, so almost everything is settled by the first bulk request — and
+   the pass before all of them costs nothing at all, since a name looked up in
+   the last week is already in hand. */
 async function resolve(names, step){
-  const cards = new Map();
+  const cards = new Map(), alts = new Set();
   let missed = [];
 
-  for (let i = 0; i < names.length; i += api.NAMES_PER_LOOKUP){
-    const batch = names.slice(i, i + api.NAMES_PER_LOOKUP);
-    const got = await lookup(batch);
-    for (const [name, card] of got.cards) cards.set(name, card);
-    missed.push(...got.missed);
-    step(i + batch.length);
+  /* The cache is read above the batching rather than inside it: a hit that
+     still had to travel in a 75-name request would have saved nothing. What is
+     left is the only thing worth asking about. */
+  const ask = [];
+  for (const name of names){
+    const hit = store.cards.get(name);
+    if (!hit){ ask.push(name); continue; }
+    cards.set(name, hit.card);
+    if (hit.alt) alts.add(name);
+  }
+  const known = cards.size;
+  step(known);
+
+  /* No batch depends on any other, so they all go at once and the client's
+     pacing decides when each actually leaves. Asking one question at a time was
+     what made a 500-card cube take a minute: a 75-name lookup takes about 2.6
+     seconds to come back and we are allowed one every 550ms, so waiting for
+     each answer spent four fifths of the rate we were entitled to. */
+  let asked = 0;
+  const got = await Promise.all(chunk(ask, api.NAMES_PER_LOOKUP).map(async batch => {
+    const answer = await lookup(batch);
+    step(known + (asked += batch.length));
+    return answer;
+  }));
+  /* Merged in the order asked rather than the order answered, so a list
+     resolves the same way on every run. */
+  for (const answer of got){
+    for (const [name, card] of answer.cards){
+      cards.set(name, card);
+      store.cards.put(name, card, false);
+    }
+    missed.push(...answer.missed);
   }
 
   /* `/cards/collection` matches either half of a split card but not the joined
@@ -87,16 +122,21 @@ async function resolve(names, step){
      repeated name in one lookup would let pair()'s positional fallback drift. */
   const faceOf = new Map(splits.map(n => [n, n.split('//')[0].trim()]));
   const faces = [...new Set(faceOf.values())];
-  for (let i = 0; i < faces.length; i += api.NAMES_PER_LOOKUP){
-    const {cards: got} = await lookup(faces.slice(i, i + api.NAMES_PER_LOOKUP));
+  const retried = await Promise.all(
+    chunk(faces, api.NAMES_PER_LOOKUP).map(batch => lookup(batch)));
+  for (const {cards: got} of retried)
     for (const [name, face] of faceOf){
       const card = got.get(face);
-      if (card && !cards.has(name)) cards.set(name, card);
+      if (card && !cards.has(name)){
+        cards.set(name, card);
+        /* Kept under the joined name the list used, which is the string that
+           will be asked about next time. */
+        store.cards.put(name, card, false);
+      }
     }
-  }
   if (splits.length) missed = missed.filter(n => !cards.has(n));
 
-  return {cards, missed};
+  return {cards, missed, alts};
 }
 
 /* ---- printings out ---- */
@@ -188,11 +228,36 @@ export async function printsFor(ids, src){
   }
   const out = new Map();
   for (const id of ids){
-    const arts = new Map();
-    out.set(id, {
-      prints: (found.get(id) || []).map(p => printing(p, arts, src)),
+    const arts = new Map(), mine = {};
+    const got = {
+      prints: (found.get(id) || []).map(p => printing(p, arts, mine)),
       arts: arts.size,
-    });
+    };
+    /* The images are gathered per card before being merged into the shared map,
+       so the cache can keep each card's own alongside its printings. An empty
+       list is kept too: "this card has no English paper printing" is a real
+       answer and worth not asking for again. */
+    Object.assign(src, mine);
+    store.prints.put(id, {...got, src: mine});
+    out.set(id, got);
+  }
+  return out;
+}
+
+/* What the cache already holds for these cards, in the same shape printsFor()
+   returns, with their images added to `src`.
+
+   Read here rather than inside printsFor() because the gallery fetches fifteen
+   cards a request: satisfying part of a batch from the cache would leave the
+   request behind it asking after one or two. Taking the hits out first instead
+   keeps every request that does go out full. */
+export function cachedPrints(ids, src){
+  const out = new Map();
+  for (const id of ids){
+    const hit = store.prints.get(id);
+    if (!hit) continue;
+    Object.assign(src, hit.src);
+    out.set(id, {prints: hit.prints, arts: hit.arts});
   }
   return out;
 }
@@ -225,15 +290,13 @@ function geometry(text){
 /* svgs.scryfall.io is not rate limited, so these run in parallel — but they
    also never change, which makes them worth keeping between visits. A symbol
    that will not load costs its card nothing but an icon. */
-const CACHE = 'cp:sym:';
-
 async function toSymbols(codes, all, done){
   const sets = {}, queue = [...codes];
   const worker = async () => {
     for (let code; (code = queue.shift()) !== undefined; ){
       const set = all[code];
       if (set){
-        const cached = localStorage.getItem(CACHE + code);
+        const cached = store.symbols.get(code);
         let svg = cached;
         if (!svg) try {
           const res = await fetch(set.icon);
@@ -241,7 +304,7 @@ async function toSymbols(codes, all, done){
         } catch { /* offline, blocked, or malformed — draw nothing */ }
         if (svg){
           sets[code] = {name: set.name, svg};
-          if (!cached) try { localStorage.setItem(CACHE + code, svg); } catch {}
+          if (!cached) store.symbols.put(code, svg);
         }
       }
       done();
@@ -258,7 +321,7 @@ async function toSymbols(codes, all, done){
    fetched afterwards, into a gallery that is already on screen and already
    browsable — so they get no phase here. */
 export const PHASE = {
-  find: {id: 'find', label: 'Finding cards',            unit: 'names', weight: .7},
+  find: {id: 'find', label: 'Checking card names',      unit: 'names', weight: .7},
   alt:  {id: 'alt',  label: 'Checking alternate names', unit: 'names', weight: .3},
 };
 
@@ -270,28 +333,39 @@ const MAX_ALTS = 60;
 
 export async function resolveNames(names, {at, onReport, maxAlts = MAX_ALTS} = {}){
   at('find', 0, names.length);
-  const {cards: resolved, missed} = await resolve(names, done => at('find', done, names.length));
+  /* `alts` comes back already holding the names the cache knows were found
+     under another name, since those never reach the pass below a second time. */
+  const {cards: resolved, missed, alts} = await resolve(names, done => at('find', done, names.length));
   at('find', names.length, names.length, `${resolved.size} of ${names.length} matched`);
 
   /* Anything still unmatched gets one fuzzy lookup each — that is what finds a
      card listed under an alternate printed name. A list where every name was
      spelt correctly skips the phase rather than reporting nothing to do, so
      what shows on screen is only work that ran. */
-  const alts = new Set();
   const tryable = missed.slice(0, maxAlts);
   if (tryable.length){
     at('alt', 0, tryable.length);
-    for (const [i, name] of tryable.entries()){
+    /* Counted here rather than off `alts`, which may already carry names this
+       run never had to look up. */
+    let found = 0, back = 0;
+    /* One request per name, all sent at once and paced by the client — these
+       are the slow path, so waiting for each answer before asking the next
+       question is exactly where it hurts most. */
+    const guesses = await Promise.all(tryable.map(async name => {
       const card = await api.named(name);
-      if (card){
-        resolved.set(name, card);
-        alts.add(name);
-      }
-      at('alt', i + 1, tryable.length);
+      at('alt', ++back, tryable.length);
+      return [name, card];
+    }));
+    for (const [name, card] of guesses){
+      if (!card) continue;
+      resolved.set(name, card);
+      alts.add(name);
+      found++;
+      store.cards.put(name, card, true);
     }
     const skipped = missed.length - tryable.length;
     at('alt', tryable.length, tryable.length,
-      (alts.size ? `${alts.size} found under another name` : 'none recovered')
+      (found ? `${found} found under another name` : 'none recovered')
       + (skipped ? ` · ${skipped} not checked` : ''));
   }
 
