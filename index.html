@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Card Print Gallery</title>
+<link rel="stylesheet" href="styles.css">
+<script type="module" src="js/main.js"></script>
+</head>
+<body>
+<header class="bar">
+  <div class="brand">
+    <h1>Card Print Gallery</h1>
+    <div class="tally" id="tally"></div>
+  </div>
+  <div class="lede">Every English paper printing of each card, oldest to newest, grouped by colour. Hover a card for its set and artist; click through to Scryfall.</div>
+  <div class="controls">
+    <input type="search" id="q" class="field" placeholder="Filter by card, set or artist" autocomplete="off" aria-label="Filter cards">
+    <button class="tog" id="t-uniq" aria-pressed="true">Unique arts</button>
+    <button class="tog" id="t-detail" aria-pressed="false">Print details</button>
+    <button class="tog" id="t-wrap" aria-pressed="false">Wrap rows</button>
+    <label class="sizer">Size <input type="range" id="size" min="112" max="340" value="184" aria-label="Card size"></label>
+    <button class="tog" id="t-theme">Switch theme</button>
+    <nav class="nav" id="nav" aria-label="Jump to colour"></nav>
+  </div>
+</header>
+<main id="out"></main>
+<div class="note" id="note"></div>
+<footer>Card data and images from the <a href="https://scryfall.com">Scryfall</a> API; artwork &copy; Wizards of the Coast and the credited artists. Prices are indicative USD market values at build time.</footer>
+</body>
+</html>
