@@ -1,14 +1,23 @@
 # Card Print Gallery
 
-Paste a list of Magic cards and see every English paper printing of each one,
-grouped by colour. Card data and images come from the
+Paste a list of Magic cards — or point at a [CubeCobra](https://cubecobra.com)
+cube, or compare two of them — and see every English paper printing of each
+card, grouped by colour. Card data and images come from the
 [Scryfall](https://scryfall.com) API, fetched in the browser — there is no
 build step and no server of our own.
 
-## Using it
+There are three ways in, chosen at the top of the page:
 
-Open the page, paste one card a line, and press **Load**. Quantities and set
-hints are ignored, so a decklist pastes in as it is:
+| | |
+|---|---|
+| **Text list** | paste card names |
+| **CubeCobra → View** | pull one cube's list |
+| **CubeCobra → Diff** | compare two cubes and pick a slice to look at |
+
+## A typed list
+
+Paste one card a line and press **Load**. Quantities and set hints are ignored,
+so a decklist pastes in as it is:
 
 ```
 4x Thraben Inspector
@@ -16,8 +25,19 @@ Lightning Bolt (2x2) 117
 Wear // Tear
 ```
 
-A progress bar runs while the names are resolved and the printings fetched.
-Names that needed a second look are listed with a tick or a cross:
+Only the name lookup is worth waiting for — it is what decides whether the list
+is right, and it is quick. It runs in two phases, each with its own tally:
+
+```
+✓  Finding cards               20 of 22 matched
+·  Checking alternate names    2 of 3 names
+```
+
+Each phase stays on screen once it has run and swaps its count for what it came
+back with. A phase with no work to do — nothing to recover on a list that was
+spelt correctly — is not shown at all.
+
+Names that needed a second look are then listed with a tick or a cross:
 
 - **✗** nothing matched — check the spelling.
 - **✓ against a different name** the card was found under an alternate name.
@@ -30,17 +50,106 @@ If every name matched exactly the gallery opens straight away; otherwise
 
 The list is kept in `localStorage`, so it survives a reload.
 
+## Printings arrive while you browse
+
+The gallery opens as soon as the names resolve — for a 474-card cube, about
+three seconds — with every row named and grouped, each holding a few blank
+tiles where its printings will go. Those are fetched afterwards, fifteen cards
+at a time, and each row is redrawn on its own as they land, so nothing under
+the reader moves. The masthead counts them off:
+
+```
+474 cards · 812 printings · 331 distinct arts    loading printings · 120 of 474
+```
+
+**Whatever is on screen is fetched next.** Before each batch goes out, the rows
+still waiting are ranked by distance from the middle of the viewport, so
+scrolling to the bottom of a 474-card cube gets you that part of it rather than
+making you wait for the other 400. The ranking is worked out fresh each time
+rather than tracked as the page moves — one pass over the waiting rows costs
+nothing beside the request it precedes, and it can never be stale. Cards
+filtered out of view by a search are still fetched, just last.
+
+A card that resolves but has no English paper printing — digital-only cards,
+which cubes do contain — says so in place of its tiles, and is named under the
+gallery, rather than quietly going missing.
+
+## Cubes
+
+**View** takes a cube and drops its list into the same textarea, so everything
+above still applies — the names stay editable and it is the textarea, not the
+cube, that gets loaded. Any of these work:
+
+```
+https://cubecobra.com/cube/list/peach_peasant
+peach_peasant
+https://cubecobra.com/cube/list/5d3f7245d1bbf667dd9d4286
+```
+
+so do the other cube sub-pages (`/cube/overview/…`, `/cube/playtest/…`), with
+or without a scheme, trailing slash or query string. Fetching replaces what was
+in the box and offers an **Undo**.
+
+**Diff** takes two cubes. Resolve each one — they get their own progress and
+their own tick/cross report, so a name can be fixed and that cube resolved
+again on its own — and a slot folds away to a one-line summary once it comes
+back clean. Then pick what to look at:
+
+```
+WHAT DO YOU WANT TO SEE?
+457 shared · 17 only in A · 83 only in B
+
+( ) In both cubes                                        457
+    peach peasant cube ∩ The Peasant Cube 2026
+    ▸ Preview 457 cards
+( ) Only in peach peasant cube                            17
+    missing from The Peasant Cube 2026
+( ) Only in The Peasant Cube 2026                         83
+    missing from peach peasant cube
+```
+
+Each preview opens in place into its own scrolling box, so a 457-card list
+neither moves the page nor runs off the end of it. Choosing a slice and
+pressing **Show these cards** goes straight to the gallery — the cards are
+already resolved, so there is nothing at all left to wait for.
+
+Cubes are compared by **card identity, not by the name each list used**. Two
+cubes can write the same card differently — `Wear` against `Wear // Tear`, or
+an alternate printed name — and comparing strings would call that a difference.
+Where it happens, the summary says how many shared cards are listed under
+different names.
+
+### Sharing a comparison
+
+The address bar always holds the cubes on screen:
+
+```
+index.html?a=peach_peasant&b=5d3f7245d1bbf667dd9d4286
+```
+
+Opening that link goes straight to Diff with both cubes pulled and ready.
+Resolving them stays a deliberate click — it is a thousand card lookups, not
+something to spend on someone else's behalf. **Copy link** puts the URL on the
+clipboard. A single cube shares as `?cube=peach_peasant`.
+
 ## Layout
 
 ```
 index.html        markup, control elements, and the CSP
 styles.css        all styling
 js/scryfall.js    Scryfall client — rate limiting, 429s, the batch endpoints
-js/data.js        names in, gallery data out: resolve, fetch, group, index
+js/cubecobra.js   CubeCobra client — id parsing, cube list, cube name
+js/progress.js    weighted progress across whichever phases a run uses
+js/data.js        names in, gallery data out: resolve, plan, fetch, compare
 js/render.js      pure HTML generation, no DOM access
-js/ui.js          DOM wiring: views, controls, state, rendering
+js/ui.js          DOM wiring: screens, controls, state, rendering
 js/main.js        entry point
 ```
+
+Screens are swapped by CSS alone: every element names the screens it belongs to
+with `data-pane`, and the current `data-view` on `<body>` hides everything that
+is not it. Adding a screen is one more rule rather than one more thing every
+existing rule has to remember to hide.
 
 ## Talking to Scryfall
 
@@ -72,7 +181,33 @@ Three quirks are worth knowing:
   opaque image, so CSS could not colour its paths by rarity — and cached in
   `localStorage`, since they never change.
 
-[CORS and CSP](https://scryfall.com/docs/api/http-concerns): `api.scryfall.com`
+Resolving both cubes above — 1,014 names — costs 20 API requests and no 429s.
+
+## Talking to CubeCobra
+
+`/cube/api/cubelist/<id>` answers with `Access-Control-Allow-Origin: *`, so the
+browser can call it directly. It returns one card name a line, about 8 KB for a
+500-card cube. The obvious alternative, `/cube/api/cubeJSON/<id>`, is **1.26 MB**
+for the same cube — it embeds a full denormalised card record each, around 2.6 KB
+apiece, of which the names we want are 0.6%.
+
+Two things to know if you touch this:
+
+- **A 404 carries no CORS header.** The browser rejects `fetch` with a bare
+  `TypeError` before any status can be read, so a wrong id, an unreachable site
+  and a `connect-src` violation are genuinely indistinguishable from script.
+  The message says so rather than guessing, and the raw error goes to the
+  console where the browser's own explanation will be sitting next to it.
+- **The cube's display name is only in `cubeJSON`,** which ignores `Range`
+  (it answers `200` with the whole body). But `cards` is its last key and
+  everything before it is about 2 KB, so `title()` reads the stream until the
+  cards begin, closes the prefix into valid JSON, and cancels. That costs tens
+  of kilobytes rather than the full 224 KB gzipped. It can never throw: a null
+  just means the cube is labelled with its id.
+
+## CORS and CSP
+
+[Scryfall's guidance](https://scryfall.com/docs/api/http-concerns): `api.scryfall.com`
 and the `*.scryfall.io` asset origins send `Access-Control-Allow-Origin: *`,
 and the preflight for the JSON POST to `/cards/collection` allows
 `Content-Type`, so the browser can call them directly and no proxy is needed.

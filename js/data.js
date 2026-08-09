@@ -3,6 +3,12 @@
 
 import * as api from './scryfall.js';
 
+/* Which card this is, regardless of the name it was listed under. The gallery
+   groups rows by it and the cube diff buckets by it; they have to agree, so
+   there is one rule and it lives here. */
+export const identity = card =>
+  card.oracle_id || (card.card_faces || [])[0]?.oracle_id || card.id;
+
 const GROUPS = [['w','White'],['u','Blue'],['b','Black'],['r','Red'],['g','Green'],
   ['m','Multicolour'],['c','Colourless'],['l','Lands']];
 const ORDER = new Map(GROUPS.map(([key], i) => [key, i]));
@@ -70,20 +76,23 @@ async function resolve(names, step){
     const got = await lookup(batch);
     for (const [name, card] of got.cards) cards.set(name, card);
     missed.push(...got.missed);
-    step((i + batch.length) / names.length);
+    step(i + batch.length);
   }
 
   /* `/cards/collection` matches either half of a split card but not the joined
      "Wear // Tear" form the card is actually filed under, so a miss with a
      slash in it has earned one more attempt. */
   const splits = missed.filter(n => n.includes('//'));
-  const faces = splits.map(n => n.split('//')[0].trim());
-  for (let i = 0; i < splits.length; i += api.NAMES_PER_LOOKUP){
+  /* Ask once per distinct face: two split cards can share a first face, and a
+     repeated name in one lookup would let pair()'s positional fallback drift. */
+  const faceOf = new Map(splits.map(n => [n, n.split('//')[0].trim()]));
+  const faces = [...new Set(faceOf.values())];
+  for (let i = 0; i < faces.length; i += api.NAMES_PER_LOOKUP){
     const {cards: got} = await lookup(faces.slice(i, i + api.NAMES_PER_LOOKUP));
-    splits.slice(i, i + api.NAMES_PER_LOOKUP).forEach((name, j) => {
-      const card = got.get(faces[i + j]);
-      if (card) cards.set(name, card);
-    });
+    for (const [name, face] of faceOf){
+      const card = got.get(face);
+      if (card && !cards.has(name)) cards.set(name, card);
+    }
   }
   if (splits.length) missed = missed.filter(n => !cards.has(n));
 
@@ -136,45 +145,56 @@ function printing(p, arts, src){
   };
 }
 
-async function assemble(resolved, alts, step){
+/* Every row the gallery will show, known the moment the names resolve: all of
+   this comes off the card itself, so the page can be drawn and browsed while
+   the printings are still on their way. `prints` is null until they land. */
+export function plan(resolved, alts){
   /* Two spellings of the same card collapse into one row, so group by identity
      rather than by the line that was typed. */
   const byOracle = new Map();
   for (const [input, card] of resolved){
-    const id = card.oracle_id || (card.card_faces || [])[0]?.oracle_id || card.id;
+    const id = identity(card);
     if (!byOracle.has(id)) byOracle.set(id, {card, inputs: []});
     byOracle.get(id).inputs.push(input);
   }
 
-  const ids = [...byOracle.keys()], prints = new Map();
-  for (let i = 0; i < ids.length; i += api.CARDS_PER_SEARCH){
-    for (const p of await api.printings(ids.slice(i, i + api.CARDS_PER_SEARCH))){
-      if (!prints.has(p.oracle_id)) prints.set(p.oracle_id, []);
-      prints.get(p.oracle_id).push(p);
-    }
-    step(Math.min(i + api.CARDS_PER_SEARCH, ids.length) / ids.length);
-  }
-
-  const src = {}, cards = [];
+  const cards = [];
   for (const [id, {card, inputs}] of byOracle){
-    const list = prints.get(id);
-    if (!list?.length) continue;
-    const arts = new Map(), key = group(card);
+    const key = group(card);
     cards.push({
-      name: card.name,
+      id, name: card.name,
       type: card.type_line || '',
       mana: card.mana_cost
         || (card.card_faces || []).map(f => f.mana_cost).filter(Boolean).join(' // '),
       b: key, bn: NAME.get(key),
-      prints: list.map(p => printing(p, arts, src)),
-      arts: arts.size,
+      prints: null, arts: 0,
       /* the name the list used, when it was not the one Scryfall files the
          card under — the gallery prints it under the title */
       alt: inputs.find(n => alts.has(n)) || '',
     });
   }
   cards.sort((a, b) => ORDER.get(a.b) - ORDER.get(b.b) || a.name.localeCompare(b.name));
-  return {cards, src};
+  return cards;
+}
+
+/* The printings of a handful of cards, in the shape the tiles want, with their
+   images added to `src`. An empty list back is a real answer: the card exists
+   but has no English paper printing, which is how digital-only cards arrive. */
+export async function printsFor(ids, src){
+  const found = new Map();
+  for (const p of await api.printings(ids)){
+    if (!found.has(p.oracle_id)) found.set(p.oracle_id, []);
+    found.get(p.oracle_id).push(p);
+  }
+  const out = new Map();
+  for (const id of ids){
+    const arts = new Map();
+    out.set(id, {
+      prints: (found.get(id) || []).map(p => printing(p, arts, src)),
+      arts: arts.size,
+    });
+  }
+  return out;
 }
 
 /* ---- set symbols ---- */
@@ -233,64 +253,109 @@ async function toSymbols(codes, all, done){
 
 /* ---- the whole job ---- */
 
-/* Weighted rather than counted, because how big the later phases are is not
-   known until the earlier ones have run. */
-const PHASES = [
-  ['Looking up names', .18],
-  ['Checking alternate names', .10],
-  ['Fetching printings', .47],
-  ['Fetching set symbols', .25],
-];
+/* Resolving names is the only part worth waiting for: it is what decides
+   whether the list is right, and it is quick. Printings and set symbols are
+   fetched afterwards, into a gallery that is already on screen and already
+   browsable — so they get no phase here. */
+export const PHASE = {
+  find: {id: 'find', label: 'Finding cards',            unit: 'names', weight: .7},
+  alt:  {id: 'alt',  label: 'Checking alternate names', unit: 'names', weight: .3},
+};
 
-export async function build(names, {onProgress, onReport}){
-  const at = (n, f = 0) => onProgress(
-    PHASES.slice(0, n).reduce((total, [, weight]) => total + weight, 0)
-      + PHASES[n][1] * Math.min(f, 1),
-    PHASES[n][0]);
+/* The fuzzy pass is one rate-limited request per unmatched name. On a typed
+   list that is nothing; on a 500-card cube pasted wrong it would be a
+   half-hour hang with no way out, so it is capped and the rest reported as
+   misses. */
+const MAX_ALTS = 60;
 
-  at(0);
-  const {cards: resolved, missed} = await resolve(names, f => at(0, f));
+export async function resolveNames(names, {at, onReport, maxAlts = MAX_ALTS} = {}){
+  at('find', 0, names.length);
+  const {cards: resolved, missed} = await resolve(names, done => at('find', done, names.length));
+  at('find', names.length, names.length, `${resolved.size} of ${names.length} matched`);
 
   /* Anything still unmatched gets one fuzzy lookup each — that is what finds a
-     card listed under an alternate printed name. These are one-at-a-time and
-     rate limited, so they are also the slowest thing here; by this point there
-     should be very few left. */
-  at(1);
+     card listed under an alternate printed name. A list where every name was
+     spelt correctly skips the phase rather than reporting nothing to do, so
+     what shows on screen is only work that ran. */
   const alts = new Set();
-  for (const [i, name] of missed.entries()){
-    const card = await api.named(name);
-    if (card){
-      resolved.set(name, card);
-      alts.add(name);
+  const tryable = missed.slice(0, maxAlts);
+  if (tryable.length){
+    at('alt', 0, tryable.length);
+    for (const [i, name] of tryable.entries()){
+      const card = await api.named(name);
+      if (card){
+        resolved.set(name, card);
+        alts.add(name);
+      }
+      at('alt', i + 1, tryable.length);
     }
-    at(1, (i + 1) / missed.length);
+    const skipped = missed.length - tryable.length;
+    at('alt', tryable.length, tryable.length,
+      (alts.size ? `${alts.size} found under another name` : 'none recovered')
+      + (skipped ? ` · ${skipped} not checked` : ''));
   }
 
-  onReport(names.map(name =>
+  onReport?.(names.map(name =>
     !resolved.has(name) ? {input: name, status: 'miss'}
     : alts.has(name) ? {input: name, status: 'alt', name: resolved.get(name).name}
     : {input: name, status: 'ok'}));
 
-  at(2);
-  const {cards, src} = await assemble(resolved, alts, f => at(2, f));
+  return {resolved, alts, missing: names.filter(n => !resolved.has(n))};
+}
 
-  at(3);
-  const codes = [...new Set(cards.flatMap(c => c.prints.map(p => p.s)))];
+/* The symbols for whichever sets have turned up so far, added to `into`. A code
+   that fails is recorded as null rather than left absent, so a set whose symbol
+   will not load is not asked for again on every later batch. */
+export async function symbolsFor(codes, into){
+  const need = codes.filter(code => !(code in into));
+  if (!need.length) return [];
   const all = await api.sets();
-  let done = 0;
-  const sets = await toSymbols(codes, all, () => at(3, ++done / codes.length));
-  onProgress(1, 'Done');
+  Object.assign(into, await toSymbols(need, all, () => {}));
+  for (const code of need) if (!(code in into)) into[code] = null;
+  return need;
+}
+
+/* ---- comparing two lists ---- */
+
+/* Compared by card identity, never by the line each list used: two cubes can
+   write the same card differently — "Wear" against "Wear // Tear", or an
+   alternate printed name — and comparing strings would call that a difference.
+
+   Each entry keeps the line both sides actually used, which is what lets the
+   preview and the gallery caption stay honest about what was typed. */
+export function compare(a, b){
+  const index = resolved => {
+    const by = new Map();
+    for (const [input, card] of resolved){
+      const id = identity(card);
+      if (!by.has(id)) by.set(id, {id, name: card.name, card, input});
+    }
+    return by;
+  };
+
+  const left = index(a), right = index(b);
+  const both = [], onlyA = [], onlyB = [];
+  for (const [id, e] of left){
+    const other = right.get(id);
+    if (other) both.push({id, name: e.name, card: e.card, a: e.input, b: other.input});
+    else onlyA.push({id, name: e.name, card: e.card, a: e.input, b: null});
+  }
+  for (const [id, e] of right)
+    if (!left.has(id)) onlyB.push({id, name: e.name, card: e.card, a: null, b: e.input});
+
+  const byName = (x, y) => x.name.localeCompare(y.name);
+  for (const list of [both, onlyA, onlyB]) list.sort(byName);
 
   return {
-    db: {
-      cards,
-      missing: names.filter(n => !resolved.has(n)),
-      stats: {
-        cards: cards.length,
-        prints: cards.reduce((n, c) => n + c.prints.length, 0),
-        arts: cards.reduce((n, c) => n + c.arts, 0),
-      },
-    },
-    src, sets,
+    both, onlyA, onlyB,
+    /* shared cards the two cubes spell differently — the visible payoff of
+       comparing by identity, and the explanation for any count that looks off */
+    renamed: both.filter(e => e.a.toLowerCase() !== e.b.toLowerCase()),
+    /* card counts, not line counts: two lines can collapse to one card */
+    counts: {a: left.size, b: right.size,
+      both: both.length, onlyA: onlyA.length, onlyB: onlyB.length},
   };
 }
+
+/* A chosen bucket, in the shape plan() wants. */
+export const selection = entries => new Map(entries.map(e => [e.a ?? e.b, e.card]));

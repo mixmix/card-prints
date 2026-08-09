@@ -125,8 +125,17 @@ export async function printings(oracleIds){
   return out;
 }
 
-/* One request covers every set there has ever been. */
-export async function sets(){
+/* One request covers every set there has ever been — and it is the same answer
+   every time, so switching between diff buckets should not ask again. The
+   promise is kept rather than the result, so concurrent callers share one
+   request; a failure is dropped so the next caller can retry. */
+let allSets = null;
+
+export function sets(){
+  return allSets ??= fetchSets().catch(err => { allSets = null; throw err; });
+}
+
+async function fetchSets(){
   const body = await json('/sets', {gap: OTHER_GAP});
   const out = {};
   for (const s of body.data) out[s.code.toUpperCase()] = {name: s.name, icon: s.icon_svg_uri};

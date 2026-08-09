@@ -11,7 +11,8 @@
      attributes on generated markup, not for a stylesheet. -->
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'none';
-  connect-src 'self' https://api.scryfall.com https://*.scryfall.io;
+  connect-src 'self' https://api.scryfall.com https://*.scryfall.io
+              https://cubecobra.com https://www.cubecobra.com;
   img-src 'self' https://*.scryfall.io data:;
   script-src 'self';
   style-src 'self' 'unsafe-inline';
@@ -20,7 +21,7 @@
 <link rel="stylesheet" href="styles.css">
 <script type="module" src="js/main.js"></script>
 </head>
-<body data-view="list" data-state="idle">
+<body data-view="list">
 <!-- referenced by set symbols printed at uncommon; SVG fill takes a paint
      server like this but not a CSS gradient -->
 <svg width="0" height="0" aria-hidden="true" focusable="false" style="position:absolute">
@@ -35,11 +36,40 @@
   </defs>
 </svg>
 
-<section class="setup" id="view-list" aria-label="Card list">
-  <h1>Card Print Gallery</h1>
-  <p class="lede">Paste a list of Magic cards, one a line, and this will look up
+<!-- Panes are shown by `data-pane` matching the body's `data-view`; the shell
+     carries both of its children's names so it survives either. -->
+<section class="setup" data-pane="list cube diff" aria-label="Set up">
+  <div class="setup-head">
+    <h1>Card Print Gallery</h1>
+    <div class="modes" role="group" aria-label="Where the cards come from">
+      <button class="tog" id="mode-text" aria-pressed="true">Text list</button>
+      <button class="tog" id="mode-cube" aria-pressed="false">CubeCobra</button>
+    </div>
+    <div class="modes sub" data-pane="cube diff" role="group" aria-label="What to do with the cube">
+      <button class="tog" id="mode-view" aria-pressed="true">View</button>
+      <button class="tog" id="mode-diff" aria-pressed="false">Diff</button>
+    </div>
+  </div>
+
+<!-- One loader serves both the typed list and a single cube; the fetch row is
+     the only difference, so it names itself as cube-only rather than the pane
+     being built twice. -->
+<div id="view-load" data-pane="list cube" data-state="idle">
+  <p class="lede" data-pane="list">Paste a list of Magic cards, one a line, and this will look up
     every English paper printing of each from <a href="https://scryfall.com">Scryfall</a>.
     Quantities and set hints are ignored, so a decklist works as it is.</p>
+  <p class="lede" data-pane="cube">Give a CubeCobra cube and its list drops in below, ready to
+    edit. Every English paper printing of each card comes from
+    <a href="https://scryfall.com">Scryfall</a>.</p>
+
+  <div class="from" data-pane="cube">
+    <input type="text" id="cube" class="field grow" autocomplete="off" spellcheck="false"
+      aria-label="CubeCobra link or cube id"
+      placeholder="cubecobra.com/cube/list/… or peach_peasant">
+    <button class="tog" id="cube-get">Fetch</button>
+  </div>
+  <div class="count said" id="cube-note" data-pane="cube" role="status"></div>
+
   <textarea id="list" class="paste" rows="14" spellcheck="false" autocomplete="off"
     aria-label="Card names, one a line"
     placeholder="Thraben Inspector&#10;4 Lightning Bolt&#10;Birds of Paradise (rvr) 172"></textarea>
@@ -49,19 +79,95 @@
   </div>
   <div class="progress" id="progress">
     <div class="track"><div class="fill" id="bar"></div></div>
-    <div class="phase" id="phase"></div>
+    <ol class="steps" id="steps"></ol>
+    <div class="phase" id="phase" tabindex="-1" role="status"></div>
   </div>
   <div class="report" id="report"></div>
-  <div class="setup-bar" id="after">
+  <div class="setup-bar after" id="after">
     <button class="go" id="go-on">Continue</button>
     <span class="count">Load again after editing the list, or carry on with what was found.</span>
   </div>
+</div>
+
+<div id="view-diff" data-pane="diff">
+  <p class="lede">Resolve each cube's names, then choose what to look at: what they
+    share, or what one has that the other is missing.</p>
+  <div class="setup-bar share">
+    <button class="tog" id="share">Copy link</button>
+    <span class="count" id="share-note" role="status">The address bar keeps both cubes, so this
+      comparison can be handed to someone else.</span>
+  </div>
+
+  <details class="cube" id="cube-a" data-state="idle" open>
+    <summary>
+      <span class="side">Cube A</span>
+      <span class="cube-name serif" id="a-name">not set</span>
+      <span class="cube-stat" id="a-stat"></span>
+    </summary>
+    <div class="from">
+      <input type="text" id="a-src" class="field grow" autocomplete="off" spellcheck="false"
+        aria-label="Cube A link or id" placeholder="cubecobra.com/cube/list/… or an id">
+      <button class="tog" id="a-get">Fetch</button>
+    </div>
+    <div class="count said" id="a-note" role="status"></div>
+    <textarea id="a-list" class="paste" rows="6" spellcheck="false" autocomplete="off"
+      aria-label="Cube A card names, one a line"></textarea>
+    <div class="setup-bar">
+      <button class="go" id="a-load">Resolve</button>
+      <span class="count" id="a-count"></span>
+    </div>
+    <div class="progress">
+      <div class="track"><div class="fill" id="a-bar"></div></div>
+      <ol class="steps" id="a-steps"></ol>
+      <div class="phase" id="a-phase" tabindex="-1" role="status"></div>
+    </div>
+    <div class="report" id="a-report"></div>
+  </details>
+
+  <details class="cube" id="cube-b" data-state="idle" open>
+    <summary>
+      <span class="side">Cube B</span>
+      <span class="cube-name serif" id="b-name">not set</span>
+      <span class="cube-stat" id="b-stat"></span>
+    </summary>
+    <div class="from">
+      <input type="text" id="b-src" class="field grow" autocomplete="off" spellcheck="false"
+        aria-label="Cube B link or id" placeholder="cubecobra.com/cube/list/… or an id">
+      <button class="tog" id="b-get">Fetch</button>
+    </div>
+    <div class="count said" id="b-note" role="status"></div>
+    <textarea id="b-list" class="paste" rows="6" spellcheck="false" autocomplete="off"
+      aria-label="Cube B card names, one a line"></textarea>
+    <div class="setup-bar">
+      <button class="go" id="b-load">Resolve</button>
+      <span class="count" id="b-count"></span>
+    </div>
+    <div class="progress">
+      <div class="track"><div class="fill" id="b-bar"></div></div>
+      <ol class="steps" id="b-steps"></ol>
+      <div class="phase" id="b-phase" tabindex="-1" role="status"></div>
+    </div>
+    <div class="report" id="b-report"></div>
+  </details>
+
+  <section class="pick" id="pick" data-state="idle" hidden>
+    <h2 class="pick-h">What do you want to see?</h2>
+    <p class="pick-sum" id="pick-sum" role="status"></p>
+    <ul class="buckets" id="buckets"></ul>
+    <div class="setup-bar">
+      <button class="go" id="pick-load" disabled>Show these cards</button>
+      <span class="count" id="pick-count"></span>
+    </div>
+  </section>
+</div>
 </section>
 
-<header class="bar">
+<header class="bar" data-pane="gallery">
   <div class="brand">
     <h1>Card Print Gallery</h1>
+    <span class="ctx" id="ctx"></span>
     <div class="tally" id="tally"></div>
+    <div class="loading" id="loading" role="status"></div>
     <button class="tog chev" id="t-bar" aria-expanded="true" aria-controls="controls"
       aria-label="Hide controls" title="Hide controls">
       <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8.5 12 15.5 19 8.5"/></svg>
@@ -72,7 +178,7 @@
       <svg class="i" viewBox="0 0 24 24" aria-hidden="true">
         <path d="M4 20h4.1L19.3 8.8a2.1 2.1 0 0 0-3-3L5.1 17V20Z"/>
         <path d="M13.8 7.3l3 3"/>
-      </svg>Edit list</button>
+      </svg><span id="edit-label">Edit list</span></button>
     <input type="search" id="q" class="field" placeholder="Filter by card, set or artist" autocomplete="off" aria-label="Filter cards">
     <button class="tog" id="t-uniq" aria-pressed="true">Unique arts</button>
     <button class="tog" id="t-detail" aria-pressed="false">Print details</button>
@@ -81,8 +187,8 @@
     <nav class="nav" id="nav" aria-label="Jump to colour"></nav>
   </div>
 </header>
-<main id="out"></main>
-<div class="note" id="note"></div>
-<footer>Card data and images from the <a href="https://scryfall.com">Scryfall</a> API; artwork &copy; Wizards of the Coast and the credited artists. Prices are indicative USD market values.</footer>
+<main id="out" data-pane="gallery"></main>
+<div class="note" id="note" data-pane="gallery"></div>
+<footer data-pane="gallery">Card data and images from the <a href="https://scryfall.com">Scryfall</a> API; artwork &copy; Wizards of the Coast and the credited artists. Prices are indicative USD market values.</footer>
 </body>
 </html>

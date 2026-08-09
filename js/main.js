@@ -1,3 +1,3 @@
 import {init} from './ui.js';
 
-init();
+init().catch(err => console.error(err));

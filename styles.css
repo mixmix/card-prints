@@ -35,17 +35,39 @@ body{
 .serif{font-family:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif}
 
 /* ---- views ---- */
-/* One document, two states: the list you paste into, and the gallery it
-   builds. The gallery keeps its scroll position and its controls while you go
-   back to the list, so editing is a detour rather than a reload. */
-body[data-view="list"] .bar,
-body[data-view="list"] main,
-body[data-view="list"] .note,
-body[data-view="list"] footer,
-body[data-view="gallery"] .setup{display:none}
+/* One document, three screens: the list you paste into, the two cubes you
+   compare, and the gallery either builds. The gallery keeps its scroll
+   position and its controls while you go back, so editing is a detour rather
+   than a reload.
+
+   Each screen's elements name themselves with `data-pane`, and the current
+   view hides everything that is not it — so adding a view means adding one
+   rule here rather than remembering every element the new view must hide. A
+   pane may name more than one view (`~=`), which is how the setup shell
+   survives across both of the screens it holds. These rules only ever hide:
+   nothing gets a display value here, so layout stays with the components. */
+body[data-view="list"]    [data-pane]:not([data-pane~="list"]),
+body[data-view="cube"]    [data-pane]:not([data-pane~="cube"]),
+body[data-view="diff"]    [data-pane]:not([data-pane~="diff"]),
+body[data-view="gallery"] [data-pane]:not([data-pane~="gallery"]){display:none}
 
 /* ---- the list ---- */
 .setup{max-width:64ch; margin:0 auto; padding:8vh 22px 64px}
+/* two cubes and a chooser want more room than one textarea does */
+body[data-view="diff"] .setup{max-width:74ch}
+.setup-head{display:flex; align-items:baseline; gap:12px; flex-wrap:wrap}
+.modes{display:flex; gap:7px}
+/* the second choice belongs to the first, so it sits after it and is quieter */
+.modes.sub{margin-left:auto}
+.modes.sub .tog{font-size:11.5px; padding:5px 10px}
+
+/* where a cube comes from */
+.from{display:flex; gap:8px; align-items:center; margin-bottom:9px}
+.field.grow{width:auto; flex:1; min-width:0}
+.said:not(:empty){margin:-3px 0 11px}
+.said b{color:var(--accent); font-weight:600}
+.said .bad{color:var(--r)}
+.said .tog{font-size:11px; padding:3px 8px; margin-left:7px}
 .lede{color:var(--mid); font-size:13.5px; margin:12px 0 20px; max-width:58ch}
 .lede a{color:var(--accent)}
 .paste{
@@ -70,13 +92,30 @@ body[data-view="gallery"] .setup{display:none}
 .count{color:var(--faint); font-size:12px}
 
 /* ---- progress ---- */
+/* `data-state` belongs to a unit of work, not to the page: the list has one,
+   and each cube being compared has its own. So these are written against
+   whichever element carries it. Those elements never nest — one state per
+   unit, and no unit contains another. */
 .progress{margin-top:20px}
-body[data-state="idle"] .progress{display:none}
+[data-state="idle"] .progress{display:none}
 .track{height:5px; border-radius:3px; background:var(--sunk); overflow:hidden}
 .fill{height:100%; width:0; background:var(--accent); transition:width .25s ease}
 @media (prefers-reduced-motion:reduce){.fill{transition:none}}
 .phase{margin-top:8px; color:var(--mid); font-size:12px; min-height:1.4em}
 .phase .bad{color:var(--r)}
+
+/* One row per phase, each with its own tally — the phases count different
+   things, so a single running total would say less than nothing. */
+.steps{list-style:none; margin:12px 0 0; padding:0; display:flex; flex-direction:column; gap:6px}
+.step{display:flex; gap:10px; align-items:baseline; font-size:12.5px; color:var(--mid)}
+.step .mark{font-size:12px}
+.step.now{color:var(--ink)}
+.step.now .mark{color:var(--accent); animation:blink 1.1s ease-in-out infinite}
+.step.done .mark{color:var(--g)}
+.step .what{flex:1}
+.step .tick{color:var(--faint); font-size:12px}
+@keyframes blink{50%{opacity:.2}}
+@media (prefers-reduced-motion:reduce){.step.now .mark{animation:none}}
 
 /* ---- the verdict on each name ---- */
 .report:not(:empty){margin-top:22px}
@@ -102,8 +141,77 @@ body[data-state="idle"] .progress{display:none}
 .check .tog{font-size:11.5px; padding:4px 9px}
 
 /* The way on is only offered once there is something to go on to. */
-#after{display:none}
-body[data-state="done"] #after{display:flex}
+.after{display:none}
+[data-state="done"] .after{display:flex}
+
+.share{margin:-6px 0 4px}
+.share .count{flex:1; min-width:18ch}
+
+/* ---- a cube being compared ---- */
+/* A rule down the side rather than a filled panel: the slot holds a textarea,
+   a progress block and a report, all of which already sit on --panel, and
+   tinting the ground under them would mean re-tinting every one. */
+.cube{border-left:3px solid var(--rule); padding-left:15px; margin-top:24px}
+.cube[data-state="working"]{border-left-color:var(--accent)}
+.cube[data-state="done"]{border-left-color:var(--g)}
+.cube > summary{
+  list-style:none; cursor:pointer; display:flex; gap:11px;
+  align-items:baseline; flex-wrap:wrap; padding:3px 0 9px;
+}
+.cube > summary::-webkit-details-marker{display:none}
+.cube > summary::after{
+  content:""; margin-left:auto; align-self:center; width:7px; height:7px;
+  border-right:1.5px solid var(--faint); border-bottom:1.5px solid var(--faint);
+  rotate:45deg; transition:rotate .18s ease;
+}
+.cube[open] > summary::after{rotate:-135deg}
+.cube > summary:focus-visible{outline:2px solid var(--accent); outline-offset:3px}
+.side{font-size:11px; letter-spacing:2.6px; text-transform:uppercase; color:var(--accent)}
+.cube-name{font-size:15.5px; overflow-wrap:anywhere}
+.cube-stat{color:var(--faint); font-size:12px}
+@media (prefers-reduced-motion:reduce){.cube > summary::after{transition:none}}
+
+/* ---- which cards to look at ---- */
+.pick{margin-top:34px}
+.pick-h{font-size:11.5px; font-weight:600; letter-spacing:2.6px;
+  text-transform:uppercase; color:var(--mid); margin:0}
+.pick-sum{color:var(--faint); font-size:12px; margin:7px 0 0}
+.buckets{list-style:none; margin:13px 0 0; padding:0; display:flex; flex-direction:column; gap:1px}
+.bucket{background:var(--panel); border:1px solid var(--rule)}
+.bucket:first-child{border-radius:8px 8px 0 0}
+.bucket:last-child{border-radius:0 0 8px 8px}
+.bucket:only-child{border-radius:8px}
+.bucket + .bucket{border-top:0}
+.bucket:has(input:checked){background:var(--sunk); border-color:var(--accent)}
+.bucket:has(input:disabled){opacity:.5}
+.pick-row{display:flex; gap:11px; align-items:baseline; padding:11px 13px; cursor:pointer}
+.bucket:has(input:disabled) .pick-row{cursor:default}
+.pick-row input{accent-color:var(--accent); flex:none; translate:0 2px}
+.pick-row .what{flex:1}
+.pick-row .what b{color:var(--accent); font-weight:600}
+.pick-row .who{display:block; color:var(--faint); font-size:11.5px; margin-top:2px}
+.pick-row .n{color:var(--accent); font-weight:600; font-size:14px}
+
+/* The preview expands below its own summary, so opening one never moves the
+   page under you — which is the whole reason it is a <details>. */
+.peek{padding:0 13px 11px}
+.peek > summary{list-style:none; cursor:pointer; color:var(--mid); font-size:11.5px; padding:2px 0}
+.peek > summary::-webkit-details-marker{display:none}
+.peek[open] > summary{color:var(--ink)}
+.peek > summary:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+/* Capped and scrolled in its own box: a bucket can hold 450 names, and the
+   containment stops a flick at the bottom carrying on into the page. Grid, not
+   columns — multi-column inside a fixed height flows sideways instead. */
+.names{
+  margin-top:8px; max-height:44vh; overflow:auto; overscroll-behavior:contain;
+  background:var(--sunk); border:1px solid var(--rule); border-radius:8px; padding:10px 12px;
+  display:grid; grid-template-columns:repeat(auto-fill,minmax(19ch,1fr)); gap:2px 16px;
+  font-size:12px; color:var(--mid);
+  scrollbar-width:thin; scrollbar-color:var(--rule) transparent;
+}
+.names span{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.names::-webkit-scrollbar{width:9px}
+.names::-webkit-scrollbar-thumb{background:var(--rule); border-radius:5px}
 
 /* ---- masthead ---- */
 /* The masthead has to be opaque to cover what scrolls under it, so it repeats
@@ -128,8 +236,18 @@ h1{
   font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
   font-size:22px; font-weight:600; margin:0; letter-spacing:.2px; text-wrap:balance;
 }
+/* which slice of a diff the gallery is showing; absent for a plain list */
+.ctx{
+  background:var(--sunk); border:1px solid var(--rule); border-radius:20px;
+  padding:3px 11px; font-size:11.5px; color:var(--accent); letter-spacing:.3px;
+}
+.ctx:empty{display:none}
 .tally{color:var(--mid); font-size:12.5px; letter-spacing:.4px}
 .tally b{color:var(--accent); font-weight:600}
+/* printings are still arriving; the gallery is browsable meanwhile */
+.loading{color:var(--faint); font-size:11.5px; letter-spacing:.4px}
+.loading:not(:empty){animation:breathe 1.6s ease-in-out infinite}
+.loading .bad{color:var(--r); animation:none}
 
 .controls{display:flex; flex-wrap:wrap; gap:7px; align-items:center; margin-top:12px}
 .field{
@@ -239,6 +357,21 @@ body.wrapped .strip{flex-wrap:wrap; overflow-x:visible}
 .card:hover .shot{box-shadow:var(--shadow-lift)}
 @media (prefers-reduced-motion:reduce){.shot{transition:none}}
 
+/* A card whose printings have not landed yet. Same footprint as a real tile,
+   so nothing moves when one replaces the other; the stagger keeps a row of
+   them from pulsing as one block. */
+.ghost{
+  flex:none; width:var(--tile); aspect-ratio:488/680; background:var(--sunk);
+  border-radius:calc(6px + (var(--tile) - 112px) * 0.0439);
+  animation:breathe 1.5s ease-in-out infinite; animation-delay:calc(var(--i, 0) * .18s);
+}
+@keyframes breathe{50%{opacity:.4}}
+.none{color:var(--faint); font-size:12px; padding:6px 0}
+@media (prefers-reduced-motion:reduce){
+  .ghost, .loading:not(:empty){animation:none}
+  .ghost{opacity:.7}
+}
+
 /* hover plate — carries the facts when captions are hidden */
 .plate{
   position:absolute; inset:auto 0 0 0; padding:16px 9px 7px;
@@ -287,4 +420,9 @@ footer a{color:var(--mid)}
   .rail{position:static}
   .nav{margin-left:0}
   .field{width:100%}
+  /* .field goes full width here, which would squeeze the Fetch button beside
+     it to nothing — let the row wrap instead. */
+  .from{flex-wrap:wrap}
+  .from .field{flex:1 1 100%}
+  .modes.sub{margin-left:0}
 }
