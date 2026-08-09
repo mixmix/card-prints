@@ -134,12 +134,13 @@ distance between the centres, so it is found by bisection — the lens shrinks
 steadily as the circles part, which pins the answer between full containment
 and no contact.
 
-The one concession: a crescent thinner than about three pixels reads as no
-crescent at all, which would leave two of the three options looking identical
-and empty. Where that would happen the circles are pulled apart until each
-slice a cube actually has can be seen. It understates the overlap rather than
-inventing one, and for the cubes above it draws 90% shared against a true
-96% — everything else, including both circle areas, stays exact.
+The one concession: a thin crescent reads as no crescent at all, which would
+leave two of the three options looking identical and empty. Where that would
+happen the circles are pulled apart until every slice a cube actually has is a
+few pixels of clear fill. It understates the overlap rather than inventing one,
+and it only bites on cubes that are nearly the same cube — for the pair above
+it draws 79% shared against a true 96%, while an ordinary diff is untouched.
+Both circle areas stay exact either way.
 
 It says what the label says and says it faster, which is also why it is marked
 decorative and never announced.
